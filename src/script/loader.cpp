@@ -224,6 +224,12 @@ void script_frame() {
 }
 
 int script_reload() {
+    // Before load_dir, never after: the files are about to re-register their
+    // callbacks, and anything left over from the previous run would be a
+    // duplicate of one of them. See runtime_clear_ticks() for what that
+    // duplication actually breaks. tests/run.sh gates this ordering, because
+    // this file is ORBIS-only and no host test can link it.
+    runtime_clear_ticks();
     return load_dir();
 }
 

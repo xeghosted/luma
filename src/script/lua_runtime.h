@@ -101,6 +101,25 @@ bool runtime_exec(const char* name, const char* src);
 // and removed so it cannot spam every frame; the rest keep running.
 void runtime_tick();
 
+// Drop every registered on_tick callback.
+//
+// This exists for one caller: script_reload(), which re-runs every file in the
+// script directory. on_tick APPENDS, and until this existed nothing ever
+// removed an entry, so a reload left the previous run's callbacks registered
+// alongside the new ones -- a second copy of every callback, then a third.
+//
+// That is not merely wasteful. Both copies run in the same frame and see the
+// same input, so a script that toggles state on a button press flipped it
+// twice and stopped responding after its first reload. Push-and-reload is the
+// normal editing loop, which made it a defect you hit immediately and could
+// not explain.
+//
+// Resources are NOT affected either way: their on_tick is a sandbox alias that
+// spawns a scheduler thread (src/script/lua/boot.lua) and never touches this
+// list, so clearing it takes out exactly the flat scripts that the reload is
+// about to re-run.
+void runtime_clear_ticks();
+
 // Destroy the lua_State. Safe to call when uninitialised.
 void runtime_shutdown();
 

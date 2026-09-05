@@ -327,6 +327,19 @@ void runtime_tick() {
     lua_pop(L, 1);                       // pop ticks table
 }
 
+void runtime_clear_ticks() {
+    if (!g_L) return;
+    // A FRESH table rather than emptying the existing one in place. runtime_tick
+    // holds the list on its own Lua stack while it iterates, so an in-place
+    // clear from inside a callback would pull the array out from under the loop
+    // it is running in; replacing the registry entry leaves that iteration
+    // walking the old table to a clean finish. No caller does this today --
+    // reloads are dispatched before runtime_tick in script_frame -- and this is
+    // the cheaper of the two ways to make sure none ever can.
+    lua_newtable(g_L);
+    lua_setfield(g_L, LUA_REGISTRYINDEX, TICKS_KEY);
+}
+
 bool runtime_exec(const char* name, const char* src) {
     return runtime_load_buffer(name, src, strlen(src));
 }

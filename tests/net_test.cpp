@@ -1059,6 +1059,71 @@ void test_resource_list_pack() {
 
 }  // namespace
 
+// A reload must not leave the previous run's on_tick callbacks registered.
+//
+// on_tick appends to the runtime's tick list, and until runtime_clear_ticks()
+// existed nothing ever removed an entry -- so every script_reload() left a
+// SECOND copy of every callback behind, then a third. Two copies are not merely
+// wasteful: both run in the same frame and see the same input, so a script that
+// toggles state on a button press flipped it twice and stopped responding after
+// its first reload.
+//
+// The old behaviour is reproduced below before the fix is applied, so the test
+// fails for the right reason if runtime_clear_ticks() is ever gutted: it is not
+// enough to assert the end state, the duplication has to be shown happening.
+//
+// This covers the runtime half. script_reload() itself lives in
+// src/script/loader.cpp, which is ORBIS-only and cannot be linked here, so
+// tests/run.sh gates that it calls this -- and calls it BEFORE load_dir.
+void test_tick_reload() {
+    check(script::runtime_init(), "the runtime starts for the tick-reload test");
+
+    // What one file in the script directory does. Re-running it is exactly what
+    // a reload does, so the same buffer stands in for both loads.
+    const char* SCRIPT = "calls = calls or 0; on_tick(function() calls = calls + 1 end)";
+    const size_t SCRIPT_LEN = strlen(SCRIPT);
+
+    auto calls = [&]() -> int {
+        char buf[64] = {0}, err[128];
+        const char* q = "return calls";
+        script::exec_result r = { buf, sizeof(buf), 0, 0, false, false };
+        if (!script::runtime_exec_capture("q", q, strlen(q), err, sizeof(err), nullptr, &r))
+            return -1;
+        return atoi(buf);
+    };
+
+    check(script::runtime_load_buffer("hello", SCRIPT, SCRIPT_LEN),
+          "a script registers an on_tick callback");
+    script::runtime_tick();
+    check(calls() == 1, "  and it runs once per frame");
+
+    check(script::runtime_load_buffer("hello", SCRIPT, SCRIPT_LEN),
+          "re-running the same file registers a second copy");
+    script::runtime_tick();
+    check(calls() == 3, "  so one frame now runs that callback twice -- the defect");
+
+    script::runtime_clear_ticks();
+    check(calls() == 3, "clearing the list runs nothing itself");
+    script::runtime_tick();
+    check(calls() == 3, "  and leaves no callback for the next frame to run");
+
+    check(script::runtime_load_buffer("hello", SCRIPT, SCRIPT_LEN),
+          "the reloaded file registers its callback again");
+    script::runtime_tick();
+    check(calls() == 4, "  and is back to exactly one call per frame");
+
+    // Clearing an already-empty list, and clearing before any init, must both
+    // be no-ops rather than reasons to crash on a console.
+    script::runtime_clear_ticks();
+    script::runtime_clear_ticks();
+    script::runtime_tick();
+    check(calls() == 4, "clearing twice over is harmless");
+
+    script::runtime_shutdown();
+    script::runtime_clear_ticks();
+    check(true, "clearing after shutdown does not crash");
+}
+
 int main() {
     test_frame();
     test_mailbox();
@@ -1066,6 +1131,7 @@ int main() {
     test_auth_policy();
     test_token_classify();
     test_exec_capture();
+    test_tick_reload();
     test_resource_list_pack();
     printf("\n%s (%d failures)\n", g_failures ? "FAILED" : "PASSED", g_failures);
     return g_failures ? 1 : 0;

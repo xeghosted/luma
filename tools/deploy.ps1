@@ -48,6 +48,43 @@ function Ftp-Put($local, $remote) {
     Write-Host ("PUT  {0} ({1} bytes)" -f $remote, $bytes.Length)
 }
 
+# Replacing the plugin cannot be a plain PUT.
+#
+# GoldHEN has this file mapped in every game it is loaded into, and overwriting
+# it in place SUCCEEDS while leaving the file holding something that is neither
+# the old build nor the new one. Observed on 2026-09-06: the upload reported
+# success and the file came back the new build's size, but its contents matched
+# no local build -- while the SAME bytes written to any other path on the same
+# console read back byte-exact. A silently wrong plugin is the worst outcome
+# this script has, because nothing looks wrong until the next boot.
+#
+# So stage beside it and rename over it. The unlink drops only the directory
+# entry, the running games keep the inode they already mapped, and the name
+# ends up pointing at a file that was never written to while it was in use.
+function Ftp-Delete($remote) {
+    try {
+        $r = [System.Net.FtpWebRequest]::Create("ftp://${Ip}:$Port$remote")
+        $r.Method = [System.Net.WebRequestMethods+Ftp]::DeleteFile
+        $r.UsePassive = $true; $r.KeepAlive = $false
+        $r.GetResponse().Close()
+    } catch { }   # not being there yet is fine: this is a replace, not a removal
+}
+function Ftp-Rename($from, $to) {
+    $r = [System.Net.FtpWebRequest]::Create("ftp://${Ip}:$Port$from")
+    $r.Method = [System.Net.WebRequestMethods+Ftp]::Rename
+    $r.RenameTo = $to
+    $r.UsePassive = $true; $r.KeepAlive = $false
+    $r.GetResponse().Close()
+}
+function Ftp-PutReplace($local, $remote) {
+    if (-not (Test-Path $local)) { Write-Host "skip $remote (no local file)"; return }
+    $tmp = "$remote.new"
+    Ftp-Put $local $tmp
+    Ftp-Delete $remote
+    Ftp-Rename $tmp $remote
+    Write-Host "MOVE $tmp -> $remote"
+}
+
 # MKD does not create parents, so walk the path and make each level. Ftp-Mkd
 # already treats "already exists" as success, so re-making a level is
 # harmless on its own -- but a resource with N files under the same
@@ -94,5 +131,5 @@ if (Test-Path "$SrcScripts/autostart.cfg") {
 
 }   # end -PrxOnly guard
 
-if (-not $SkipPrx) { Ftp-Put "$root/build/Luma.prx" "/data/GoldHEN/plugins/Luma.prx" }
+if (-not $SkipPrx) { Ftp-PutReplace "$root/build/Luma.prx" "/data/GoldHEN/plugins/Luma.prx" }
 Write-Host "Done. List Luma.prx under the game's title id in /data/GoldHEN/plugins.ini and restart it."

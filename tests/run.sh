@@ -169,6 +169,40 @@ if ! grep -q 'runtime_set_notify_sink(notify)' src/script/loader.cpp; then
 fi
 echo "the notify sink is installed at boot                       ok"
 
+# --- ...and a reload must not stack up tick callbacks -----------------------
+#
+# on_tick APPENDS to the runtime's tick list. Nothing removed an entry until
+# runtime_clear_ticks() existed, so every script_reload() left the previous
+# run's callbacks registered next to the new ones -- a second copy of every
+# callback, then a third. Both copies run in the same frame and see the same
+# input, so a script that toggles state on a button press flipped it twice and
+# stopped responding after its first reload, which is the normal editing loop.
+#
+# net_test covers runtime_clear_ticks() itself. What it cannot reach is the
+# caller: src/script/loader.cpp is ORBIS-only and never links into a host test.
+# So the call is gated at the source level, ORDER INCLUDED -- clearing after
+# load_dir would throw away the callbacks the reload just registered, which is
+# a worse failure than the one being fixed and would pass a presence-only check.
+reload_body=$(sed -n '/^int script_reload(/,/^}/p' src/script/loader.cpp)
+if [ -z "$reload_body" ]; then
+    echo "FATAL: script_reload() not found in src/script/loader.cpp." >&2
+    echo "       Renaming it silently disables this gate, so it fails instead." >&2
+    exit 1
+fi
+# Comments stripped first. The body explains itself, and both names appear in
+# that prose -- a gate a comment can flip is not a gate, so it reads the code.
+reload_code=$(printf '%s' "$reload_body" | sed 's://.*::')
+clear_at=$(printf '%s' "$reload_code" | grep -n 'runtime_clear_ticks' | head -1 | cut -d: -f1)
+load_at=$(printf '%s'  "$reload_code" | grep -n 'load_dir'            | head -1 | cut -d: -f1)
+if [ -z "$clear_at" ] || [ -z "$load_at" ] || [ "$clear_at" -ge "$load_at" ]; then
+    echo "" >&2
+    echo "script_reload() in src/script/loader.cpp must call runtime_clear_ticks()" >&2
+    echo "       BEFORE load_dir(). Without it every reload registers a second copy" >&2
+    echo "       of every on_tick callback; after it, the reload throws away its own." >&2
+    exit 1
+fi
+echo "a reload clears the previous run's tick callbacks         ok"
+
 lua5.4 tests/lua/run_lua_tests.lua
 
 (cd "$out" && gcc -std=c99 -O1 -w -I "$OLDPWD/src/lua" -c "$OLDPWD"/src/lua/*.c)
