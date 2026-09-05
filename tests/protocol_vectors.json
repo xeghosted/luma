@@ -1,0 +1,138 @@
+{
+  "comment": "Shared wire fixtures. Both the C++ codec (tests/net_test.cpp) and the VS Code client assert against these; the client keeps a vendored copy at test-fixtures/protocol_vectors.json in https://github.com/xeghosted/rage-script-manager, so a framing change has to be made in both places.",
+  "header_size": 12,
+  "max_payload": 8388608,
+  "resource_name_max_comment": "The longest resource name the lifecycle ops (START/STOP/RESTART/RESINFO) can carry, in bytes; their handlers decode it into a fixed buffer of this size plus a NUL. The runtime's own valid_name() enforces the SAME number, so a name the wire cannot act on is never listed as startable either -- a 183-character directory used to be advertised by RESLIST as 'stopped' while all four ops answered 'payload too long'. tests/net_test.cpp asserts net::RESOURCE_NAME_MAX against this number and tests/lua/resource_test.lua asserts valid_name's limit against it, so the two cannot drift apart.",
+  "resource_name_max": 127,
+  "opcodes_comment": "The opcode table itself, not just its encoding. Each suite asserts every name here against its OWN language's enum constant -- net::OP_* in C++, Op.* in TypeScript -- and that it found all of them. That is what makes the two enums unable to drift: renumbering one side alone turns that side red. The vectors below pin the byte encoding on top of this; they alone never did, because both suites read their op numbers straight out of this file.",
+  "opcodes": {
+    "HELLO": 1,
+    "PING": 2,
+    "PONG": 3,
+    "PUT": 4,
+    "GET": 5,
+    "LS": 6,
+    "RM": 7,
+    "EXEC": 8,
+    "RELOAD": 9,
+    "LOG": 10,
+    "EVENT": 11,
+    "OK": 12,
+    "ERR": 13,
+    "BUSY": 14,
+    "START": 15,
+    "STOP": 16,
+    "RESTART": 17,
+    "RESLIST": 18,
+    "RESINFO": 19,
+    "CMD": 20
+  },
+  "vectors": [
+    {
+      "name": "hello",
+      "op": 1,
+      "flags": 0,
+      "seq": 1,
+      "len": 0,
+      "hex": "474c55410100010000000000"
+    },
+    {
+      "name": "exec",
+      "op": 8,
+      "flags": 0,
+      "seq": 258,
+      "len": 5,
+      "hex": "474c55410800020105000000"
+    },
+    {
+      "name": "log_unsolicited",
+      "op": 10,
+      "flags": 0,
+      "seq": 0,
+      "len": 3,
+      "hex": "474c55410a00000003000000"
+    },
+    {
+      "name": "ok",
+      "op": 12,
+      "flags": 0,
+      "seq": 5,
+      "len": 2,
+      "hex": "474c55410c00050002000000"
+    },
+    {
+      "name": "err",
+      "op": 13,
+      "flags": 0,
+      "seq": 1000,
+      "len": 11,
+      "hex": "474c55410d00e8030b000000"
+    },
+    {
+      "name": "busy",
+      "op": 14,
+      "flags": 0,
+      "seq": 42,
+      "len": 0,
+      "hex": "474c55410e002a0000000000"
+    },
+    {
+      "name": "start",
+      "op": 15,
+      "flags": 0,
+      "seq": 1,
+      "len": 0,
+      "hex": "474c55410f00010000000000"
+    },
+    {
+      "name": "stop",
+      "op": 16,
+      "flags": 0,
+      "seq": 3,
+      "len": 0,
+      "hex": "474c55411000030000000000"
+    },
+    {
+      "name": "restart",
+      "op": 17,
+      "flags": 0,
+      "seq": 4,
+      "len": 0,
+      "hex": "474c55411100040000000000"
+    },
+    {
+      "name": "reslist",
+      "op": 18,
+      "flags": 0,
+      "seq": 2,
+      "len": 0,
+      "hex": "474c55411200020000000000"
+    },
+    {
+      "name": "resinfo",
+      "op": 19,
+      "flags": 0,
+      "seq": 5,
+      "len": 0,
+      "hex": "474c55411300050000000000"
+    },
+    {
+      "name": "cmd",
+      "op": 20,
+      "flags": 0,
+      "seq": 6,
+      "len": 0,
+      "hex": "474c55411400060000000000"
+    }
+  ],
+  "rejects": [
+    {
+      "name": "bad magic",
+      "hex": "584c55410100010000000000"
+    },
+    {
+      "name": "len too big",
+      "hex": "474c55410400010001008000"
+    }
+  ]
+}

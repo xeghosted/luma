@@ -1,0 +1,27 @@
+# This repo is developed on Windows but its scripts run under WSL/bash, and
+# core.autocrlf=true would otherwise check them out with CRLF. A shell script
+# with CRLF does not merely look odd — bash fails on it outright:
+#
+#   tests/run.sh: line 8: set: -: invalid option
+#   tests/run.sh: line 9: cd: $'/mnt/e/...\r': No such file or directory
+#
+# That is exactly how the test runner broke once this branch was merged, so
+# these must always be LF regardless of the checking-out platform.
+*.sh text eol=lf
+
+# tests/run.sh diffs the committed src/script/embedded_lua.h byte-for-byte
+# against a fresh run of tools/gen_embedded_lua.py, which always writes LF.
+# A CRLF checkout would make that gate fail on every single line for a header
+# that is perfectly up to date.
+src/script/embedded_lua.h text eol=lf
+
+# Same reasoning for the native bindings. tests/run.sh regenerates all four
+# with tools/gen_natives.py and diffs them against these committed copies; the
+# generator pins its output to LF, so a CRLF checkout would report every one of
+# them as stale while they are in fact correct. native_registry.json is the
+# input those four are derived from and is written the same way.
+src/rage/invoker/natives.h          text eol=lf
+src/rage/invoker/natives_registry.h text eol=lf
+scripts/natives.lua                 text eol=lf
+editor/lua-defs/natives.def.lua     text eol=lf
+tools/native_registry.json          text eol=lf

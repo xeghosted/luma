@@ -1,0 +1,7 @@
+build/
+*.prx
+*.elf
+*.oelf
+
+editor/node_modules/
+editor/out/
