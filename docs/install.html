@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Install — Luma</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Build Luma with the OpenOrbis toolchain, push it to a jailbroken PS4 over GoldHEN's FTP, and read the first boot log.">
+<link rel="stylesheet" href="style.css">
+
+<header class="site">
+  <div class="brand">
+    <a class="name" href="index.html">Luma</a>
+    <span class="tag">Lua scripting for RAGE games on PS4</span>
+  </div>
+  <nav class="site">
+    <a href="index.html">Overview</a>
+    <a href="install.html" aria-current="page">Install</a>
+    <a href="scripting.html">Scripting</a>
+    <a href="editor.html">Editor</a>
+    <a href="internals.html">Internals</a>
+    <a href="https://github.com/xeghosted/luma">GitHub</a>
+  </nav>
+</header>
+
+<div class="wrap">
+
+<h1>Install</h1>
+<p class="lede">
+  Build the plugin, push it and one game's scripts to the console, list it in
+  <code>plugins.ini</code>, start the game. Then read the log, because the log is how
+  you find out whether any of it worked.
+</p>
+
+<h2>What you need</h2>
+<ul>
+  <li>A PS4 running <b>GoldHEN</b>, with its FTP server reachable (port 2121).</li>
+  <li><b>Grand Theft Auto V CUSA00411 v1.57</b> or <b>Red Dead Redemption 2
+      CUSA03041 v1.32</b>. Other versions are refused — see
+      <a href="internals.html#profiles">why</a>.</li>
+  <li>The <b>OpenOrbis PS4 Toolchain</b>, to build. It is a Linux toolchain, so on
+      Windows build under WSL.</li>
+  <li><b>PowerShell 7</b> for <code>tools/deploy.ps1</code>, or any FTP client if you
+      would rather copy the files yourself.</li>
+</ul>
+
+<h2>1. Build</h2>
+<p>
+  <code>OO_PS4_TOOLCHAIN</code> must point at the toolchain; <code>build.sh</code>
+  refuses without it rather than producing something subtly wrong.
+</p>
+<pre><code>export OO_PS4_TOOLCHAIN=/path/to/OpenOrbis/PS4Toolchain
+./build.sh
+# -&gt; build/Luma.prx   the plugin, fake-signed
+# -&gt; build/Luma.elf   the same image unsigned, useful for inspection</code></pre>
+
+<p>On Windows, from the repository root:</p>
+<pre><code>wsl -e bash -lc "cd /mnt/c/path/to/Luma &amp;&amp; \
+  export OO_PS4_TOOLCHAIN=/mnt/c/PS4/OpenOrbis/PS4Toolchain &amp;&amp; ./build.sh"</code></pre>
+
+<p>
+  The build ends with a post-link check that the image carries no
+  <code>.init_array</code>. That is not ceremony: this plugin runs no static
+  initialisers, so a file-scope object with a constructor would be silently dead
+  code, and the linker is the only thing that can see it.
+</p>
+
+<h3>Run the tests first</h3>
+<pre><code>bash tests/run.sh</code></pre>
+<p>
+  Everything below the ORBIS line is plain C++ and Lua, so most of the plugin is
+  exercised on a PC: the native bridge and its marshalling, the wire codec, the
+  resource model, the scheduler, and the generated bindings against a fresh
+  regeneration. It also re-checks that each profile's frame hook is still
+  <a href="internals.html#detour">safe to detour</a>. If this is red, do not deploy.
+</p>
+
+<h2>2. Push it to the console</h2>
+<pre><code>pwsh tools/deploy.ps1 -Ip 192.168.1.50 -Game gta5     # or -Game rdr2</code></pre>
+
+<p>
+  <code>-Game</code> picks <em>both</em> ends at once — which scripts are sent and
+  which data root they go to — so one game's <code>natives.lua</code> can never reach
+  the other's directory. That separation is structural, not a flag you have to
+  remember.
+</p>
+
+<table>
+  <tr><th>Flag</th><th></th></tr>
+  <tr><td><code>-Ip</code></td><td>Your console's address. Required; there is no default, because a default that is not your console fails as a connection timeout rather than as a missing argument.</td></tr>
+  <tr><td><code>-Game</code></td><td><code>gta5</code> or <code>rdr2</code>. Defaults to <code>rdr2</code>.</td></tr>
+  <tr><td><code>-PrxOnly</code></td><td>Send only the plugin, leaving the scripts on the console alone.</td></tr>
+  <tr><td><code>-SkipPrx</code></td><td>Send only the scripts and resources.</td></tr>
+  <tr><td><code>-Port</code></td><td>FTP port, default 2121.</td></tr>
+</table>
+
+<p>What lands where:</p>
+<pre><code>/data/GoldHEN/plugins/Luma.prx    the plugin — one file, both games
+
+/data/gtalua/natives.lua          generated bindings, loaded before your scripts
+/data/gtalua/scripts/*.lua        your flat scripts, loaded in directory order
+/data/gtalua/resources/&lt;name&gt;/    resources, each with an fxmanifest.lua
+/data/gtalua/autostart.cfg        resources to start at boot, one name per line
+/data/gtalua/gtalua.log           log() / print() / notify() output, and load errors
+/data/gtalua/token                optional shared secret for the control channel
+
+/data/rdr2lua/…                   the same shape, for Red Dead Redemption 2</code></pre>
+
+<div class="note">
+  <strong>Replacing the plugin is not a plain upload.</strong>
+  GoldHEN keeps <code>Luma.prx</code> mapped in every game it is loaded into.
+  Overwriting it in place <em>succeeds</em> and can leave the file holding neither
+  the old build nor the new one. <code>deploy.ps1</code> therefore stages the file
+  beside the target and renames over it: the unlink drops only the directory entry,
+  the running game keeps the copy it already mapped, and the new name points at a
+  file that was never written while in use. If you copy the plugin by hand, do the
+  same — or close the game first.
+</div>
+
+<h2>3. List it in plugins.ini</h2>
+<p>
+  Edit <code>/data/GoldHEN/plugins.ini</code> and name the plugin under each game's
+  title id. The same file serves both:
+</p>
+<pre><code>[CUSA00411]
+/data/GoldHEN/plugins/Luma.prx
+
+[CUSA03041]
+/data/GoldHEN/plugins/Luma.prx</code></pre>
+
+<p><b>The plugin is mapped at title launch.</b> Start the game — or restart it, if it
+was already running.</p>
+
+<h2>4. Read the first boot</h2>
+<p>
+  Fetch the log over FTP, or use <b>RAGE: Show Log</b> in the
+  <a href="editor.html">editor</a>. A healthy GTA V boot looks like this:
+</p>
+<pre><code>[profile] Grand Theft Auto V (CUSA00411), data root /data/gtalua/, port 9615
+[Boot] luma: ready
+[hash_natives] walked table: 6691 natives, 0 rejected
+[hash_natives] GET_HASH_KEY -&gt; 0x72B71C36 (OK, table usable)
+[natives] hash registry ready: 6691 natives (attempt 1)
+hello.lua loaded; hash registry ready: true
+[resource] started hello</code></pre>
+
+<p>The three lines that actually matter, in order:</p>
+<ul>
+  <li><b><code>[profile] …</code></b> — Luma recognised the build. If this line is
+      missing, nothing else will work; see below.</li>
+  <li><b><code>GET_HASH_KEY -&gt; 0x…&nbsp;(OK)</code></b> — Luma asked the game to
+      hash a known string and the game returned the value Luma predicted. That single
+      line proves the image base, the addresses and the call ABI all agree.</li>
+  <li><b><code>[Boot] luma: ready</code></b> — the frame hook is installed and
+      running on the game thread.</li>
+</ul>
+
+<h2>When it does not work</h2>
+
+<h3>The log says no known build matched</h3>
+<pre><code>[profile] no known build matched. At rva 0xAA9310 this image has
+          55 48 89 E5 41 56 53 49 - Luma supports CUSA00411 v1.57
+          and CUSA03041 v1.32 only</code></pre>
+<p>
+  Your game version is not one of the two supported builds, and Luma stopped rather
+  than call addresses belonging to a different executable. The bytes in the message
+  are what it actually found, which is the useful half: they identify the build to
+  whoever wants to add it. There is no flag to force it, deliberately.
+</p>
+
+<h3>There is no log at all</h3>
+<p>
+  The plugin never loaded. Check <code>plugins.ini</code> names the right path under
+  the right title id, that <code>/data/GoldHEN/plugins/Luma.prx</code> exists and is
+  the size your build produced, and that you restarted the game after adding it.
+</p>
+
+<h3>The game boots, then crashes a few seconds in</h3>
+<p>
+  Almost always a script, not the plugin — the frame hook runs your
+  <code>on_tick</code> on the game thread, so a native called with the wrong argument
+  types crashes the game rather than raising. Move
+  <code>/data/&lt;game&gt;/scripts/</code> aside and boot clean to confirm, then
+  reintroduce one script at a time. The
+  <a href="scripting.html#natives">signature table</a> is what to check.
+</p>
+
+<h3>The editor connects and then hangs</h3>
+<p>
+  The control channel serves one client at a time. A second connection is accepted
+  and never answered, which looks exactly like a hang. Disconnect whatever else is
+  attached — including <code>tools/console.ps1</code>.
+</p>
+
+<h2>Uninstalling</h2>
+<p>
+  Remove the plugin's line from <code>plugins.ini</code> and restart the game. Delete
+  <code>/data/GoldHEN/plugins/Luma.prx</code> and the game's data root if you want the
+  scripts gone too. Luma writes nothing outside those two places and modifies nothing
+  on disk that belongs to the game.
+</p>
+
+</div>
+
+<footer class="site">
+  <div class="wrap">
+    Luma is MIT licensed.
+    <a href="https://github.com/xeghosted/luma">Source on GitHub</a>.
+  </div>
+</footer>
+</html>

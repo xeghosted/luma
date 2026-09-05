@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Scripting — Luma</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Writing Lua for Luma: on_tick, calling natives, out-parameters and Vector3, memory, and the resource model.">
+<link rel="stylesheet" href="style.css">
+
+<header class="site">
+  <div class="brand">
+    <a class="name" href="index.html">Luma</a>
+    <span class="tag">Lua scripting for RAGE games on PS4</span>
+  </div>
+  <nav class="site">
+    <a href="index.html">Overview</a>
+    <a href="install.html">Install</a>
+    <a href="scripting.html" aria-current="page">Scripting</a>
+    <a href="editor.html">Editor</a>
+    <a href="internals.html">Internals</a>
+    <a href="https://github.com/xeghosted/luma">GitHub</a>
+  </nav>
+</header>
+
+<div class="wrap">
+
+<h1>Scripting</h1>
+<p class="lede">
+  Two ways to write code: a flat <code>.lua</code> file in the game's
+  <code>scripts/</code> directory, or a <b>resource</b> — a folder with a manifest
+  that can be started, stopped and restarted while the game runs. Start flat; move to
+  a resource when you want lifecycle.
+</p>
+
+<h2>A flat script</h2>
+<p>
+  Every <code>.lua</code> file in <code>/data/&lt;game&gt;/scripts/</code> is loaded at
+  boot, in directory order, after <code>natives.lua</code>. There is no manifest and no
+  lifecycle: the file runs once, and whatever it registers keeps running.
+</p>
+
+<pre><code>-- /data/gtalua/scripts/hello.lua
+local frames = 0
+
+on_tick(function()
+    frames = frames + 1
+    if frames &lt; 1800 then return end       -- about a minute at 30 fps
+    frames = 0
+
+    local ped = GET_PLAYER_PED(-1)
+    local c   = GET_ENTITY_COORDS(ped, true)
+    log(string.format("ped=%d at %.1f, %.1f, %.1f", ped, c[1], c[2], c[3]))
+end)</code></pre>
+
+<div class="warn">
+  <strong>Register your tick callback unconditionally.</strong>
+  Reloading the script directory clears the tick list and then re-runs every file, so
+  a plain <code>on_tick(fn)</code> at the top level is right and cannot accumulate
+  copies. Do <em>not</em> guard it behind a global flag: globals live in the same
+  <code>lua_State</code> and survive the reload, the tick list does not, so the file
+  would skip the registration it believes it already did and leave nothing driving
+  your code at all.
+</div>
+
+<h2>on_tick</h2>
+<p>
+  <code>on_tick(fn)</code> runs <code>fn</code> <b>every frame, on the game thread</b>.
+  That is what makes drawing and input work: the graphics and control natives are
+  frame-scoped — they contribute to the frame being built right now rather than
+  painting something that stays — so anything that stops calling them every frame
+  simply disappears.
+</p>
+<p>
+  It also means your callback is inside the game's frame. Take too long and the game
+  stutters. A callback that raises is logged once and <em>removed</em>, so it cannot
+  spam the log every frame — which is convenient, and also means a bug can make your
+  script vanish without further comment. Wrap anything risky in <code>pcall</code>.
+</p>
+
+<h2 id="natives">Calling natives</h2>
+<p>
+  <code>natives.lua</code> binds every native the build registers under its canonical
+  name. They are ordinary Lua functions; there are no RVAs in script code.
+</p>
+
+<pre><code>local ped = GET_PLAYER_PED(-1)                    -- GTA V
+local ped = PLAYER_PED_ID()                       -- RDR2
+SET_ENTITY_COORDS(ped, x, y, z + 50.0, false, false, false, true)
+local speed = GET_ENTITY_SPEED(ped)               -- a float return
+local c     = GET_ENTITY_COORDS(ped, true)        -- a Vector3 return -&gt; {x, y, z}</code></pre>
+
+<p>Each binding carries a signature — one character per slot, return type first:</p>
+<table>
+  <tr><th><code>v</code></th><td>void</td><th><code>i</code></th><td>int</td><th><code>f</code></th><td>float</td></tr>
+  <tr><th><code>b</code></th><td>bool</td><th><code>s</code></th><td>string</td><th><code>p</code></th><td>pointer</td></tr>
+  <tr><th><code>3</code></th><td colspan="5">Vector3 — arrives as a Lua table <code>{x, y, z}</code></td></tr>
+</table>
+
+<h3>Names you will not find</h3>
+<p>
+  On RDR2, <b>2,325 of the 7,072 natives have a spelled-out name</b>. The other 4,747
+  are bound as <code>_0x&lt;16 hex digits&gt;</code>, because no public name exists for
+  them. They are perfectly callable — you just have to know which one you want. GTA V's
+  names are near-complete by comparison.
+</p>
+
+<h3>natives_ready()</h3>
+<p>
+  On GTA V, 3,674 of 6,485 natives have no static address and are resolved by walking
+  the running game's own table at boot. Those raise if the walk failed.
+  <code>natives_ready()</code> tells you whether that half is live. On RDR2 every
+  address is known before boot, so it is true as soon as the image base resolves.
+  Check it if your script must not half-run:
+</p>
+<pre><code>if not natives_ready() then return end</code></pre>
+
+<h2>Out-parameters and memory</h2>
+<p>
+  A native with a <code>p</code> slot wants an address to write into.
+  <code>mem_alloc(n)</code> gives you zeroed scratch, capped at 64&nbsp;KiB.
+</p>
+
+<pre><code>local lo, hi = mem_alloc(24), mem_alloc(24)
+GET_MODEL_DIMENSIONS(GET_ENTITY_MODEL(ped), lo, hi)
+local a, b = read_vector3(lo), read_vector3(hi)
+log(string.format("model is %.2f m tall", b[3] - a[3]))
+mem_free(lo); mem_free(hi)</code></pre>
+
+<div class="warn">
+  <strong>A Vector3 out-parameter is 24 bytes, not 12.</strong>
+  The game reads and writes <code>x</code>, <code>y</code> and <code>z</code> at an
+  <b>8-byte stride</b>, not packed. Allocate 24 and use <code>read_vector3</code>,
+  which spells that layout once. Allocating 12 and reading <code>p + 4</code> as
+  <code>y</code> gives garbage — and it is quiet garbage, which is worse.
+</div>
+
+<table>
+  <tr><th><code>mem_alloc(n)</code></th><td>Zeroed scratch, ≤ 64 KiB. Returns an address, or nil if the allocation itself failed.</td></tr>
+  <tr><th><code>mem_free(p)</code></th><td>Release it.</td></tr>
+  <tr><th><code>read_mem(p, size)</code></th><td>Unsigned integer. <code>size</code> is 1, 2, 4, or 8 (the default).</td></tr>
+  <tr><th><code>write_mem(p, v, size)</code></th><td>The low <code>size</code> bytes of <code>v</code>.</td></tr>
+  <tr><th><code>read_float(p)</code> / <code>write_float(p, v)</code></th><td>One 32-bit float.</td></tr>
+  <tr><th><code>read_string(p)</code></th><td>A NUL-terminated C string. nil only for a null pointer.</td></tr>
+  <tr><th><code>read_vector3(p)</code></th><td>The 8-byte-stride layout above, as <code>{x, y, z}</code>.</td></tr>
+  <tr><th><code>rva(offset)</code></th><td>Absolute address of an eboot offset.</td></tr>
+</table>
+
+<h2>Output</h2>
+<table>
+  <tr><th><code>log(...)</code> / <code>print(...)</code></th><td>To the log file and out to the editor. Every argument is stringified and joined with tabs.</td></tr>
+  <tr><th><code>notify(...)</code></th><td>The same, <b>plus</b> a PS4 on-screen notification.</td></tr>
+</table>
+<div class="note">
+  <strong>Why print does not reach the screen.</strong>
+  It used to. One notification per logged line filled a queue that drains slower than
+  a timer-driven script fills it, and the plugin's own load and error messages ended
+  up behind a backlog of coordinates. The screen is now opt-in.
+  <code>notify</code> also logs, so nothing said on screen is lost when the display
+  cuts a long line.
+</div>
+
+<h2>Calling a native the bindings do not name</h2>
+<p>
+  For a native this build does not name, or a one-off you do not want a permanent
+  binding for:
+</p>
+<pre><code>local my_native = native(0x9CCAC0, "vffffiiiii")     -- by address
+local other     = native_hash(0x897B441FF18ECBBB, "f") -- by 64-bit hash
+
+invoke(0x9CCAC0, {ARG_VOID, ARG_FLOAT, ARG_FLOAT}, 0.5, 0.5)
+invoke_hash(0x897B441FF18ECBBB, {ARG_FLOAT})</code></pre>
+<p>
+  <code>native</code> and <code>native_hash</code> parse the signature once and hand
+  back a reusable callable — that is exactly what every generated binding is.
+  <code>invoke_raw</code> infers types from the Lua values but always returns a 32-bit
+  int, so a float- or Vector3-returning native needs the explicit form.
+  <code>native_addr(hash)</code> asks the <em>game's</em> table where a hash resolves,
+  which makes it the authority when you are auditing an address.
+</p>
+
+<h2>Script globals</h2>
+<pre><code>local v = script_global(1574918)
+set_script_global(1574918, 1)</code></pre>
+<p>
+  <b>GTA V only.</b> On RDR2 the block table has not been located, so both functions
+  raise rather than read and write an address derived from nothing. That is the one
+  capability the two games do not share.
+</p>
+
+<h2 id="resources">Resources</h2>
+<p>
+  A resource is a folder under <code>/data/&lt;game&gt;/resources/</code> with an
+  <code>fxmanifest.lua</code>. It can be started, stopped and restarted while the game
+  runs, and stopping it undoes what it registered — threads, timers, event handlers,
+  commands and exports all come back down with it.
+</p>
+
+<pre><code>resources/myscript/
+├── fxmanifest.lua
+└── client.lua</code></pre>
+
+<pre><code>-- fxmanifest.lua
+fx_version 'cerulean'
+game 'gta5'
+
+name 'myscript'
+author 'you'
+version '1.0.0'
+
+client_script 'client.lua'</code></pre>
+
+<p>
+  The manifest is Lua evaluated in a sandbox, under an instruction budget, so a
+  manifest that loops forever fails instead of hanging the game.
+  <code>fx_version</code>, <code>game</code> and <code>games</code> are accepted and
+  ignored — they are there so a FiveM manifest parses unchanged.
+  <code>server_script</code> is warned about and skipped: there is no server on a
+  single-player console.
+</p>
+
+<h3>The resource API</h3>
+<pre><code>CreateThread(function()
+    while true do
+        Wait(500)                       -- milliseconds; Wait(0) is "next frame"
+        local ped = GET_PLAYER_PED(-1)
+        if IS_PED_IN_ANY_VEHICLE(ped, false) then
+            SET_VEHICLE_FIXED(GET_VEHICLE_PED_IS_IN(ped, false))
+        end
+    end
+end)
+
+AddEventHandler('onResourceStart', function(name)
+    if name == GetCurrentResourceName() then print('up') end
+end)
+
+RegisterCommand('heal', function(source, args, raw)
+    SET_ENTITY_HEALTH(GET_PLAYER_PED(-1), 200)
+end)
+
+exports('where', function()
+    local c = GET_ENTITY_COORDS(GET_PLAYER_PED(-1), true)
+    return c[1], c[2], c[3]
+end)
+
+local x, y, z = exports.myscript:where()</code></pre>
+
+<table>
+  <tr><th>Threads</th><td><code>CreateThread</code>, <code>CreateThreadNow</code>, <code>Wait</code>, <code>SetTimeout</code>, <code>ClearTimeout</code> — also under <code>Citizen.*</code></td></tr>
+  <tr><th>Events</th><td><code>AddEventHandler</code>, <code>RemoveEventHandler</code>, <code>TriggerEvent</code>, <code>RegisterNetEvent</code></td></tr>
+  <tr><th>Commands</th><td><code>RegisterCommand</code></td></tr>
+  <tr><th>Exports</th><td><code>exports('name', fn)</code> to publish, <code>exports.other:fn()</code> to call</td></tr>
+  <tr><th>Lifecycle</th><td><code>StartResource</code>, <code>StopResource</code>, <code>GetResourceState</code>, <code>GetCurrentResourceName</code></td></tr>
+  <tr><th>Compatibility</th><td><code>on_tick</code> works inside a resource too — it is an alias that spawns a thread looping on <code>Wait(0)</code>, so it is tracked and stopped with the resource like anything else</td></tr>
+</table>
+
+<h3>Starting resources at boot</h3>
+<p>
+  <code>/data/&lt;game&gt;/autostart.cfg</code>, one resource name per line. Anything not
+  listed sits there until you start it — from the
+  <a href="editor.html">editor</a>, from another resource, or from the console.
+</p>
+
+<h2>Autocomplete</h2>
+<p>
+  <code>editor/lua-defs/&lt;game&gt;/</code> holds generated LuaLS definitions for every
+  native plus a hand-written one for the runtime API. Point a
+  <code>.luarc.json</code> at the folder for your game and
+  <a href="https://marketplace.visualstudio.com/items?itemName=sumneko.lua">sumneko.lua</a>
+  will complete every native name and signature. The
+  <a href="editor.html">extension's</a> <b>New Resource</b> command scaffolds this for
+  you.
+</p>
+<div class="note">
+  <strong>Do not push a definitions file to the console.</strong>
+  A type stub in <code>scripts/</code> would be loaded and run on every boot from then
+  on. The definitions belong next to the game project, not in the game's data root —
+  the editor refuses to push one for exactly this reason.
+</div>
+
+</div>
+
+<footer class="site">
+  <div class="wrap">
+    Luma is MIT licensed.
+    <a href="https://github.com/xeghosted/luma">Source on GitHub</a>.
+  </div>
+</footer>
+</html>

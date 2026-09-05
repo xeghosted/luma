@@ -1,88 +1,97 @@
 # Luma
 
-A GoldHEN plugin that gives **RAGE games on PS4 a Lua runtime**, from one .prx.
+A GoldHEN plugin that gives **RAGE games on PS4 a Lua runtime** — one `.prx` that
+serves both Grand Theft Auto V and Red Dead Redemption 2.
 
-It identifies the game it was loaded into by a byte signature and switches
+It boots Lua 5.4 inside the game, binds the game's own native functions as ordinary
+Lua functions, and runs your code on the game thread once per frame. With the
+[VS Code extension](https://marketplace.visualstudio.com/items?itemName=DominikHeise.rage-script-manager)
+you save a file and it is running on the console a moment later — no game restart.
+
+**📖 [Documentation](https://xeghosted.github.io/luma/)** — install, scripting, the
+control protocol, and how it works inside.
+
+```lua
+on_tick(function()
+    local ped = GET_PLAYER_PED(-1)
+    local c   = GET_ENTITY_COORDS(ped, true)   -- Vector3 returns arrive as {x, y, z}
+    DRAW_RECT(0.5, 0.05, 0.2, 0.04, 0, 0, 0, 180, 0)
+end)
+```
+
+## The two games
+
+Luma identifies the game it was loaded into by a byte signature and switches
 everything that differs behind one profile: native table, frame hook, data root,
 control port.
 
 | | Grand Theft Auto V | Red Dead Redemption 2 |
 | --- | --- | --- |
 | Build | CUSA00411 v1.57 | CUSA03041 v1.32 |
-| Data root | /data/gtalua/ | /data/rdr2lua/ |
+| Data root | `/data/gtalua/` | `/data/rdr2lua/` |
 | Control port | 9615 | 9616 |
-| Natives | 6,691, walked out of the games masked registry at runtime | 7,072, compiled in from the eboot |
+| Natives | 6,485 bound: 2,811 by address, 3,674 resolved by walking the masked registry at boot | 7,072 bound, all by address, compiled in from the eboot |
 | Script globals | available | not located in this build |
 
-The data roots are deliberately separate: one console can host both, and a
-script must never land in the other games scripts/ directory.
+The data roots are deliberately separate: one console can host both, and a script
+must never land in the other game's `scripts/` directory.
 
-**An unknown build does not load.** Luma writes the bytes it found at the
-signature address into the log and stops, rather than running on with an
-address table that belongs to a different executable.
+**An unknown build does not load.** Luma writes the bytes it found at the signature
+address into its log and stops, rather than running on with an address table that
+belongs to a different executable. An RVA is valid for exactly one build.
 
-# RDR2Lua
+## Quick start
 
-A GoldHEN plugin that lets you mod **Red Dead Redemption 2 on PS4 in Lua**. It boots a
-Lua 5.4 runtime inside the game, gives scripts a bridge to the RAGE native functions,
-and runs their `on_tick` callbacks once per frame on the game thread.
+```sh
+# build (needs the OpenOrbis toolchain with OO_PS4_TOOLCHAIN set, under WSL or Linux)
+./build.sh                      # -> build/Luma.prx
+bash tests/run.sh               # host tests: bridge, marshalling, net, resources, Lua
 
-Ported from [GTALua](../GTALua), which does the same for GTA V. The Lua runtime, the
-control channel, the resource model and the VS Code extension came across unchanged;
-everything that touches the game — the invoker, the native table, the frame hook — was
-re-derived against RDR2.
-
-**Target: CUSA03041, game version 1.32.** An RVA is only valid for one build. On any
-other version these addresses point at something else and will crash the game.
-
-## Console layout
-
-```
-/data/rdr2lua/natives.lua      generated bindings for every native, loaded first
-/data/rdr2lua/scripts/*.lua    your scripts, loaded in directory order at boot
-/data/rdr2lua/resources/*/     resources, each with an fxmanifest.lua
-/data/rdr2lua/rdr2lua.log      everything log()/print()/notify() wrote, plus load errors
+# deploy
+pwsh tools/deploy.ps1 -Ip <your console's IP> -Game gta5     # or -Game rdr2
 ```
 
-## Natives
+Then list the plugin in `/data/GoldHEN/plugins.ini` under the game's title id and
+start the game:
 
-`natives.lua` binds **7,072 natives — every one this build registers — all by RVA.**
-
-```lua
-local ped = PLAYER_PED_ID()
-local c   = GET_ENTITY_COORDS(ped, 1, 0)   -- Vector3 returns arrive as {x, y, z}
-SET_ENTITY_COORDS(ped, c[1], c[2], c[3] + 50.0, false, false, false, true)
+```ini
+[CUSA00411]
+/data/GoldHEN/plugins/Luma.prx
+[CUSA03041]
+/data/GoldHEN/plugins/Luma.prx
 ```
 
-Two things are worth knowing before you go looking for a native by name:
+The full walkthrough, including what a healthy first boot looks like, is in the
+[install guide](https://xeghosted.github.io/luma/install.html).
 
-- **Only 2,325 have a spelled-out name.** The other 4,747 are bound as
-  `_0x<16 hex digits>`, because no public name exists for them. They are perfectly
-  callable — you just have to know which one you want.
-- **There is no hash registry to wait for.** GTALua reaches 3,674 of its natives by
-  hash, resolved by walking the running game's own table, so scripts there have to
-  guard on `natives_ready()`. RDR2 registers its natives in the eboot in the clear,
-  so every address is known before boot and `natives_ready()` is true as soon as the
-  image base resolves. `invoke_hash` still works; it is a binary search over a
-  compiled-in table.
+## Two things worth knowing before you start
 
-Out-parameters take an address: `mem_alloc(n)` gives you zeroed scratch, `read_mem` /
-`read_float` / `read_string` read it back, `mem_free` releases it.
+**There is no authentication unless you add it.** Anyone who can reach the control
+port can run arbitrary Lua inside the game. That is the same trust level GoldHEN's
+FTP already grants on the same network: fine on a home LAN, not fine anywhere else.
+Write a secret to the game's `token` file and set `rageScriptManager.token` to match,
+and the channel refuses everything else.
 
-**A Vector3 out-param is 24 bytes, not 12.** RDR2 reads and writes the caller's
-buffer at an 8-byte stride, so `mem_alloc(24)` and `read_vector3(p)`. See the comment
-at the top of `src/rage/invoker/invoker.h`, which shows the disassembly this comes
-from.
+**A new `.prx` needs a game restart.** Scripts and resources reload live; the plugin
+itself is mapped at title launch. `deploy.ps1` stages the file beside the target and
+renames over it, because overwriting a mapped plugin in place succeeds and leaves the
+file holding neither build.
 
-## How the native table was recovered
+## Known gap
 
-This is the part that is genuinely different from GTALua, and the reason the port was
-tractable at all.
+`script_global()` and `set_script_global()` refuse for RDR2. The script-global block
+table has not been located in that build, so `profile.script_globals_rva` is 0 and
+every caller raises rather than reading — and writing — an address derived from
+nothing. GTA V carries it at `0x3E0CFB8`, inherited from the project this grew out of; it has not been re-verified on hardware since the merge. Everything else has, on both games.
+
+## How the RDR2 native table was recovered
+
+This is the part that is genuinely different, and the reason the port was tractable.
 
 GTA V masks its native registry: every field is XOR-encoded and the table only exists
-in the running process, so GTALua has to walk it at runtime and verify the result
-before trusting it. **RDR2 does none of that.** The compiler emitted every
-registration inline and in the clear:
+in the running process, so Luma walks it at runtime and verifies the result before
+trusting it. **RDR2 does none of that.** The compiler emitted every registration
+inline and in the clear:
 
 ```asm
 movabs  rcx, 0x4EDE34FBADD967A6      ; the hash        (WAIT)
@@ -92,30 +101,30 @@ mov     [r14 + rax*8 + 8],  rdx      ; node->funcs[i]
 ```
 
 `tools/extract_registry.py` decodes those store pairs and recovers all 7,072
-`hash -> RVA` mappings from `eboot.bin` alone — no console, no disassembler, ~4
-seconds. `tools/gen_natives.py` then joins that against the names and signatures in
-`tools/rdr2_native_signatures.h` **on the hash**, never on position, which is what
-makes a wrong name unable to drag a wrong address along with it.
-
-Regenerate both after any change:
+`hash -> RVA` mappings from `eboot.bin` alone — no console, no disassembler, about
+four seconds. `tools/gen_natives.py` joins that against names and signatures **on the
+hash**, never on position, which is what stops a wrong name dragging a wrong address
+along with it.
 
 ```sh
 python tools/extract_registry.py /path/to/eboot.bin -o tools/native_registry.json
 python tools/gen_natives.py
 ```
 
-`tests/run.sh` gates on the committed bindings matching a fresh regeneration, so they
+`tests/run.sh` gates the committed bindings against a fresh regeneration, so they
 cannot drift from the registry unnoticed.
 
-## What has actually been proven
+## What has actually been proven on hardware
 
-The plugin runs on a real console. From a boot log on CUSA03041 v1.32:
+Both games, from their own boot logs:
 
 ```
+[profile] Grand Theft Auto V (CUSA00411), data root /data/gtalua/, port 9615
+[hash_natives] walked table: 6691 natives, 0 rejected
+[hash_natives] GET_HASH_KEY -> 0x72B71C36 (OK, table usable)
+
+[profile] Red Dead Redemption 2 (CUSA03041), data root /data/rdr2lua/, port 9616
 [hash_natives] 7072 natives compiled in; GET_HASH_KEY -> 0x3DBB3D48 (OK)
-rdr2lua: frame hook is alive (frame 122)
-hello: ped=258 at -1347.5, 2436.1, 308.5
-hello.lua: ped=258 at -1908.8, 3281.8, 546.9 (0.0 m/s)
 player model is 2.01 m tall
 ```
 
@@ -123,43 +132,31 @@ Each line settles something different:
 
 | evidence | what it establishes |
 | --- | --- |
-| `GET_HASH_KEY -> 0x3DBB3D48` | the game computed `joaat("rdr2lua")` itself and matched the predicted value — the extracted registry and the base + RVA arithmetic are right |
-| `frame hook is alive` | the detour and its trampoline survive the relocation |
+| `GET_HASH_KEY -> …` | the game computed the joaat hash itself and matched the predicted value — the registry and the base + RVA arithmetic are right |
+| `frame hook is alive` | the detour and its trampoline survive being relocated |
 | real world coordinates | Vector3 **returns** decode from the padded three-slot layout |
 | `0.0 m/s` | float returns |
-| `2.01 m tall` | Vector3 **out-params**: two padded 24-byte buffers through `set_vector_results`. This is the path that silently returned `{0,0,0}` on GTA V for a long time, so a non-zero answer is the one that matters |
+| `2.01 m tall` | Vector3 **out-params**: two padded 24-byte buffers through `set_vector_results` — the path that silently returned `{0,0,0}` for a long time, so a non-zero answer is the one that matters |
 
-Earlier, calling extracted addresses directly over RPC also gave `SQRT(16.0)` =
-4.0, `POW(2.0, 10.0)` = 1024.0 and `GET_HASH_KEY("gtalua")` = `0x72B71C36`.
+## Layout
 
-**Known gap:** `script_global()` / `set_script_global()` raise an error. The
-script-global block table has not been located in this build, and GTA V's
-address would read and write arbitrary memory here. Everything above works
-without it — see `src/script/script_mem.h`.
-
-## Build
-
-Needs the OpenOrbis toolchain with `OO_PS4_TOOLCHAIN` set, under WSL or Linux.
-
-```sh
-./build.sh          # -> build/RDR2Lua.prx
-bash tests/run.sh   # host tests: bridge, marshalling, net, resources
+```
+src/rage/invoker/     the native call ABI, shared by both games
+src/game/             profile detection; per-game native resolution
+src/script/           Lua runtime, the resource model, the script loader
+src/net/              the control channel
+scripts/{gta5,rdr2}/  each game's flat scripts and generated natives.lua
+resources/{gta5,rdr2}/ each game's resources
+editor/lua-defs/      LuaLS definitions, per game, for autocomplete
+tools/                extraction, generation, deploy, a shell client
+tests/                host tests — everything below the ORBIS line runs on a PC
 ```
 
-## Deploy
+## Licence
 
-`pwsh tools/deploy.ps1 -Ip <console-ip>` pushes the prx and scripts over GoldHEN's FTP.
-Add the plugin to `/data/GoldHEN/plugins.ini` under `CUSA03041`, then restart the game.
+MIT. See [LICENSE](LICENSE).
 
-## The live loop
-
-The plugin listens on **TCP 9616** — deliberately not GTALua's 9615, so both can sit on
-one console without the editor attaching to the wrong game. The VS Code extension
-[RAGE Script Manager](https://marketplace.visualstudio.com/items?itemName=DominikHeise.rage-script-manager) connects, pushes scripts and restarts
-resources without a game restart; a new `.prx` still needs one. It serves GTALua too —
-point `rageScriptManager.port` at 9616 for this one. `pwsh tools/console.ps1 <command>` speaks the same protocol from
-a shell.
-
-**There is no authentication by default.** Anyone who can reach port 9616 can run
-arbitrary Lua in the game. Write a secret to `/data/rdr2lua/token` and set
-`rageScriptManager.token` in VS Code to gate it.
+This project talks to games it does not ship, distribute or modify on disk. It
+contains no game code — only addresses and hashes derived from a binary the user
+already owns, the same category of information as the public
+[PS4 offset catalog](https://xeghosted.github.io/ps4-offsets/).

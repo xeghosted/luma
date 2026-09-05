@@ -1,13 +1,23 @@
 # Push Luma and a game's scripts to the console over GoldHEN's FTP.
-#   pwsh tools/deploy.ps1 [-Ip 10.10.10.235] [-Game rdr2|gta5] [-Port 2121] [-SkipPrx]
+#   pwsh tools/deploy.ps1 -Ip <console ip> [-Game rdr2|gta5] [-Port 2121] [-SkipPrx]
 #
 # One .prx serves both games, but their data roots are deliberately separate so
 # a script can never land in the other game's scripts/ directory -- so -Game
 # picks which tree the scripts go into. The .prx itself is the same either way.
 #
 # The plugin loads at title launch only - restart the game after pushing a new prx.
-param([string]$Ip = "10.10.10.235", [ValidateSet("rdr2","gta5")][string]$Game = "rdr2",
+param([string]$Ip = "", [ValidateSet("rdr2","gta5")][string]$Game = "rdr2",
       [int]$Port = 2121, [switch]$SkipPrx, [switch]$PrxOnly)
+
+# No default console address. The one that used to sit here was the author's
+# own, which on anyone else's network is not a convenience but a five-second
+# connection timeout that looks like a broken script rather than a missing
+# argument. Say which console you mean.
+if (-not $Ip) {
+    Write-Error "No console address. Pass -Ip <your PS4's IP>, e.g. -Ip 192.168.1.50"
+    exit 1
+}
+
 
 $DataRoot = if ($Game -eq "gta5") { "/data/gtalua" } else { "/data/rdr2lua" }
 

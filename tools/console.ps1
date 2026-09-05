@@ -34,12 +34,21 @@ param(
     [Parameter(Position = 0)][ValidateSet('hello','ping','reslist','resinfo','start','stop','restart','cmd','exec','execfile','reload','log')]
     [string]$Command = 'hello',
     [Parameter(Position = 1)][string]$Arg = '',
-    [string]$Ip = "10.10.10.235",
+    [string]$Ip = "",
     [int]$Port = 9616,
     [int]$WaitMs = 5000,
     [string]$Token = "",
     [switch]$Bytes
 )
+# No default console address. The one that used to sit here was the author's
+# own, which on anyone else's network is not a convenience but a five-second
+# connection timeout that looks like a broken script rather than a missing
+# argument. Say which console you mean.
+if (-not $Ip) {
+    Write-Error "No console address. Pass -Ip <your PS4's IP>, e.g. -Ip 192.168.1.50"
+    exit 1
+}
+
 $ErrorActionPreference = "Stop"
 $script:failed = $false
 

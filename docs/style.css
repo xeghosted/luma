@@ -1,0 +1,90 @@
+/* Shared by every page under docs/. Deliberately one small stylesheet rather
+   than a framework: GitHub Pages serves this folder as-is, with no build step,
+   so anything that needs compiling would need a pipeline nobody would run. */
+
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #666; --line: #e2e2e2;
+  --chip: #f2f2f2; --warn-bg: #fff4e5; --warn-fg: #8a4b00;
+  --accent: #0b62c4; --code-bg: #f6f7f9;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181c; --fg: #e8e8e8; --muted: #9aa0a6; --line: #2c2f36;
+    --chip: #232730; --warn-bg: #3a2a12; --warn-fg: #f0b060;
+    --accent: #6ba7f5; --code-bg: #1c1f26;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 0 1.5rem 4rem; background: var(--bg); color: var(--fg);
+  font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+.wrap { max-width: 52rem; margin: 0 auto; }
+
+/* --- masthead and navigation --- */
+header.site {
+  max-width: 52rem; margin: 0 auto; padding: 1.5rem 0 1rem;
+  border-bottom: 1px solid var(--line);
+}
+header.site .brand { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+header.site .brand a.name {
+  font-size: 1.25rem; font-weight: 650; color: var(--fg); text-decoration: none;
+}
+header.site .brand .tag { color: var(--muted); font-size: .9rem; }
+nav.site { display: flex; flex-wrap: wrap; gap: .25rem 1.1rem; margin-top: .75rem; }
+nav.site a { color: var(--muted); text-decoration: none; font-size: .92rem; }
+nav.site a:hover { color: var(--fg); }
+nav.site a[aria-current="page"] { color: var(--accent); font-weight: 600; }
+
+/* --- prose --- */
+h1 { font-size: 1.7rem; margin: 2rem 0 .5rem; line-height: 1.25; }
+h2 {
+  font-size: 1.2rem; margin: 2.5rem 0 .6rem; padding-top: .8rem;
+  border-top: 1px solid var(--line);
+}
+h3 { font-size: 1.02rem; margin: 1.6rem 0 .4rem; }
+p, ul, ol { margin: .7rem 0; }
+li { margin: .3rem 0; }
+a { color: var(--accent); }
+.lede { font-size: 1.05rem; color: var(--muted); margin-top: .25rem; }
+
+code {
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--chip); padding: .12em .38em; border-radius: 4px;
+}
+pre {
+  background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: .85rem 1rem; overflow-x: auto; margin: .9rem 0;
+}
+pre code { background: none; padding: 0; font-size: 12.5px; }
+
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .93rem; display: block; overflow-x: auto; }
+th, td { text-align: left; padding: .45rem .7rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 620; white-space: nowrap; }
+td code { white-space: nowrap; }
+
+/* --- callouts --- */
+.note, .warn {
+  border-radius: 8px; padding: .8rem 1rem; margin: 1.1rem 0; font-size: .95rem;
+  border: 1px solid var(--line); background: var(--chip);
+}
+.warn { background: var(--warn-bg); color: var(--warn-fg); border-color: transparent; }
+.note strong, .warn strong { display: block; margin-bottom: .2rem; }
+
+footer.site {
+  max-width: 52rem; margin: 3rem auto 0; padding-top: 1rem;
+  border-top: 1px solid var(--line); color: var(--muted); font-size: .88rem;
+}
+footer.site a { color: var(--muted); }
+
+/* Cards on the landing page. */
+.cards { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); margin: 1.2rem 0; }
+.card {
+  border: 1px solid var(--line); border-radius: 10px; padding: .9rem 1rem;
+  text-decoration: none; color: inherit; display: block;
+}
+.card:hover { border-color: var(--accent); }
+.card b { display: block; margin-bottom: .2rem; }
+.card span { color: var(--muted); font-size: .9rem; }

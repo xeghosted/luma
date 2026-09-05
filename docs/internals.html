@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Internals — Luma</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="How Luma tells the two games apart, calls a RAGE native, resolves 7,072 of them, and speaks to the editor.">
+<link rel="stylesheet" href="style.css">
+
+<header class="site">
+  <div class="brand">
+    <a class="name" href="index.html">Luma</a>
+    <span class="tag">Lua scripting for RAGE games on PS4</span>
+  </div>
+  <nav class="site">
+    <a href="index.html">Overview</a>
+    <a href="install.html">Install</a>
+    <a href="scripting.html">Scripting</a>
+    <a href="editor.html">Editor</a>
+    <a href="internals.html" aria-current="page">Internals</a>
+    <a href="https://github.com/xeghosted/luma">GitHub</a>
+  </nav>
+</header>
+
+<div class="wrap">
+
+<h1>Internals</h1>
+<p class="lede">
+  How one binary serves two games, how a Lua call becomes a RAGE native call, and the
+  two traps that cost the most to find.
+</p>
+
+<h2 id="profiles">Telling the games apart</h2>
+<p>
+  Luma is one <code>.prx</code> listed under several title ids, so the first thing it
+  must do is work out which game loaded it. Getting that wrong means the wrong address
+  table, which means every native call jumps somewhere arbitrary — so it does not
+  guess. It reads a <b>byte signature</b> at each profile's hook address and checks
+  <em>every</em> candidate, not just until the first hit:
+</p>
+<ul>
+  <li>No match → it logs the bytes it actually found and stops.</li>
+  <li>Two matches → the fingerprints are not distinguishing, so it refuses rather than
+      picking a game by array order.</li>
+</ul>
+<p>
+  Both signatures were checked against both eboots in all four combinations offline.
+  <code>tools/check_detour_target.py</code> re-derives that, and
+  <code>tests/run.sh</code> runs it for each profile on every test run.
+</p>
+
+<h3>The signature does double duty</h3>
+<p>
+  It is the frame hook's own prologue — deliberately, because those bytes already had
+  to be verified for a second reason (below). Reusing them as the fingerprint means one
+  check covers both questions and there is no second constant to keep in step with the
+  first.
+</p>
+
+<h2 id="detour">The trap that looked like a clean boot</h2>
+<div class="warn">
+  <strong>GoldHEN's Detour relocates nothing.</strong>
+  It measures instruction lengths with HDE64, <code>mmap</code>s a stub,
+  <code>memcpy</code>s the displaced prologue into it, and writes a 14-byte jump over
+  the original. <b>Nothing rewrites rip-relative operands or relative branches.</b> Any
+  such instruction inside those 14 bytes is silently broken in the copy.
+</div>
+<p>
+  RDR2's <code>PLAYER_PED_ID</code> is the idiomatic hook target and carries
+  <code>mov rax,[rip+0x62dcbbb]</code> at offset 6 — inside the patch. Hooking it
+  produced a boot log that looked completely healthy, followed by a crash.
+  <b>47% of that build's natives have the same shape</b>, so a hook target cannot be
+  chosen by name.
+</p>
+<p>
+  Luma hooks <code>GET_PLAYER_PED</code> instead — <code>0xAA9310</code> on GTA V,
+  <code>0x21B9140</code> on RDR2 — whose first 14 bytes are all position-independent.
+  The prologue is checked at install time and the hook refuses if the bytes do not
+  match, so a wrong address fails loudly instead of at some later frame.
+</p>
+
+<h2>Calling a native</h2>
+<p>
+  RAGE natives all have the same C signature: they take a pointer to a call context and
+  return void. Everything — arguments, return value, vector scratch — lives in that
+  struct. The layout is <b>byte-identical between GTA V and RDR2</b>, which was
+  verified against RDR2's own disassembly rather than assumed:
+</p>
+<table>
+  <tr><th>Offset</th><th>Field</th><th></th></tr>
+  <tr><td><code>0x00</code></td><td>return pointer</td><td>where the native writes its result</td></tr>
+  <tr><td><code>0x08</code></td><td>arg count</td><td></td></tr>
+  <tr><td><code>0x10</code></td><td>arg array</td><td>8 bytes per slot, regardless of type</td></tr>
+  <tr><td><code>0x18</code></td><td><code>m_data_count</code></td><td>how many vector slots the native claimed</td></tr>
+  <tr><td><code>0x20</code></td><td><code>m_script_vectors</code></td><td>4 entries, 8 bytes each — the caller's buffers</td></tr>
+  <tr><td><code>0x40</code></td><td><code>m_result_vectors</code></td><td>4 entries, 16 bytes each — the scratch the native writes</td></tr>
+</table>
+<p>
+  Those three offsets are <code>static_assert</code>ed in
+  <code>src/rage/invoker/invoker.h</code> rather than trusted, and the host test pokes
+  the struct by <em>raw byte offset</em> — the way the game reaches into it — so
+  reordering a field fails the test instead of failing on console.
+</p>
+
+<h3>Why Vector3 is the hard part</h3>
+<p>
+  A Vector3 <b>return</b> arrives as three separate 8-byte slots: <code>x</code> at
+  <code>+0</code>, <code>y</code> at <code>+8</code>, <code>z</code> at
+  <code>+0x10</code>. Not packed floats.
+</p>
+<p>
+  A Vector3 <b>out-parameter</b> is worse. The native does not write your buffer. It
+  records the address in <code>m_script_vectors</code>, writes its answer into
+  <code>m_result_vectors</code>, and returns — and the <em>caller</em> is expected to
+  copy the results back. Miss that step and every such native appears to work while
+  returning zeroes forever. That is why <code>set_vector_results</code> exists, and why
+  <code>read_vector3</code> insists on a 24-byte buffer.
+</p>
+<p>
+  <code>m_data_count</code> is written by the game, so it is not trusted: it is clamped
+  to four before being used as a loop bound.
+</p>
+
+<h2>Finding 7,072 natives without a console</h2>
+<p>The two games could hardly be more different here.</p>
+
+<h3>GTA V: a masked table, walked at runtime</h3>
+<p>
+  The registry at RVA <code>0x3E0F910</code> is XOR-masked and only exists in the
+  running process, so Luma walks it at boot, unmasks each node, and then <b>verifies
+  the result before trusting it</b>: it calls <code>GET_HASH_KEY</code> on a known
+  string and compares against the joaat value computed locally. If that check fails,
+  the hash-bound half of the bindings raises instead of dispatching into whatever the
+  walk produced. The walk finds 6,691 entries on the shipping build with 0 rejected, which is what backs the 3,674 hash-bound bindings; the other 2,811 are reached by address and need no walk.
+</p>
+
+<h3>RDR2: registrations in the clear</h3>
+<p>
+  RDR2's compiler emitted every registration inline and unobfuscated:
+</p>
+<pre><code>movabs  rcx, 0x4EDE34FBADD967A6      ; the hash        (WAIT)
+lea     rdx, [rip + 0x3906ef3]       ; the handler
+mov     [r14 + rax*8 + 0x48], rcx    ; node-&gt;hashes[i]
+mov     [r14 + rax*8 + 8],  rdx      ; node-&gt;funcs[i]</code></pre>
+<p>
+  <code>tools/extract_registry.py</code> disassembles backwards from the
+  <b>store pair</b> — <code>+0x48</code> for the hash, <code>+0x08</code> for the
+  handler — and recovers all 7,072 <code>hash → RVA</code> pairs from
+  <code>eboot.bin</code> alone, in about four seconds. No console, no debugger.
+</p>
+<p>
+  Anchoring on the store rather than on the hash literal is what makes it complete.
+  There are four distinct encodings in the wild, and a scanner looking for
+  <code>movabs</code> misses three of them:
+</p>
+<ul>
+  <li><code>movabs</code> + <code>lea</code> — the common case above.</li>
+  <li>The hash folded into the store as an imm32 (<code>TIMESTEP</code>,
+      <code>0x50597EE2</code>).</li>
+  <li><code>lea rcx,[r13+disp]</code>, deriving a neighbour's hash from a base.</li>
+  <li>Plain register-to-register moves.</li>
+</ul>
+<p>
+  <code>tools/gen_natives.py</code> then joins the recovered addresses against names and
+  signatures <b>on the hash, never on position</b>. That matters: joining two ordered
+  lists is how eleven natives once ended up with a neighbour's address <em>and</em> its
+  signature. On a hash join, a name and an address can only meet if they belong to the
+  same native.
+</p>
+<p>
+  RDR2's hashes are version-stable — 98–99% overlap across builds — so a new version
+  moves addresses, not identities.
+</p>
+
+<h2 id="protocol">The control channel</h2>
+<p>
+  A plain TCP server on the game thread's mailbox: <b>9615</b> for GTA V,
+  <b>9616</b> for RDR2. Every message is a 12-byte header and an optional payload.
+</p>
+<pre><code>  0   4       'GLUA'      magic
+  4   1       op          opcode
+  5   1       flags
+  6   2       seq         little-endian uint16
+  8   4       len         little-endian uint32, payload bytes, ≤ 8 MiB</code></pre>
+<pre><code>474c5541 01 00 0100 00000000     HELLO, seq=1, no payload
+474c5541 08 00 0201 05000000     EXEC,  seq=258, 5 bytes follow</code></pre>
+
+<table>
+  <tr><th>Op</th><th></th><th>Op</th><th></th></tr>
+  <tr><td>1 HELLO</td><td>version, base, natives_ready</td><td>10 LOG</td><td>unsolicited log line</td></tr>
+  <tr><td>2 PING / 3 PONG</td><td></td><td>11 EVENT</td><td></td></tr>
+  <tr><td>4 PUT</td><td>write a file</td><td>12 OK / 13 ERR</td><td></td></tr>
+  <tr><td>5 GET / 6 LS / 7 RM</td><td>read, list, remove</td><td>14 BUSY</td><td></td></tr>
+  <tr><td>8 EXEC</td><td>run a chunk, reply carries the result</td><td>15–17</td><td>START / STOP / RESTART</td></tr>
+  <tr><td>9 RELOAD</td><td>reload the script directory</td><td>18–19</td><td>RESLIST / RESINFO</td></tr>
+  <tr><td>20 CMD</td><td>run a registered command</td><td></td><td></td></tr>
+</table>
+
+<p>
+  The opcode table and a set of encoded vectors live in one fixture,
+  <code>tests/protocol_vectors.json</code>, which <em>both</em> sides assert against —
+  the C++ codec and the extension's TypeScript. Renumbering one side alone turns that
+  side red. The extension keeps a vendored copy, so a framing change has to be made in
+  both places or each half only agrees with itself.
+</p>
+
+<h3>Paths</h3>
+<p>
+  Every path the channel accepts is relative and resolved under the detected game's
+  data root by a guard that rejects traversal. That is what lets one extension serve
+  both games without knowing which one it is talking to: it sends
+  <code>scripts/foo.lua</code> and the plugin decides whether that means
+  <code>/data/gtalua/</code> or <code>/data/rdr2lua/</code>.
+</p>
+
+<h3 id="auth">Authentication</h3>
+<p>
+  Off by default. Write a secret to <code>/data/&lt;game&gt;/token</code> and the
+  channel refuses everything that does not present it. An empty file, or one holding
+  only whitespace, leaves the channel <b>open</b> rather than creating a secret nothing
+  could ever match — an accident that would otherwise lock you out silently.
+</p>
+<div class="warn">
+  <strong>Without a token, anyone who can reach the port can run arbitrary Lua in the
+  game.</strong>
+  That is the same trust level GoldHEN's FTP already grants on the same network. Fine
+  on a home LAN; not fine anywhere else.
+</div>
+
+<h2>The Lua side</h2>
+<p>
+  One <code>lua_State</code> for everything: flat scripts, resources and the editor
+  console all share it, which is why <code>=menu()</code> in the console can toggle
+  something a script defined. The standard library is trimmed —
+  base, coroutine, table, string, math, utf8, debug — with no <code>io</code> or
+  <code>os</code>.
+</p>
+<p>
+  <code>on_tick</code> callbacks live in a registry array driven once per frame, with
+  per-callback error isolation: one that raises is logged and removed by a swap-remove
+  that re-checks the element it moved into the freed slot, so a second bad callback
+  cannot be skipped by the removal of the first.
+</p>
+<p>
+  <b>Reloading clears that list first.</b> <code>on_tick</code> appends and nothing ever
+  removed an entry, so before <code>runtime_clear_ticks()</code> every reload left a
+  second copy of every callback registered. Two copies are not merely wasteful: both
+  run in the same frame and see the same input, so a script that toggled state on a
+  button press flipped it twice and stopped responding after its first reload — in the
+  push-and-reload loop that is the normal way to work.
+</p>
+<p>
+  Resources are unaffected either way. Their <code>on_tick</code> is a sandbox alias
+  that spawns a scheduler thread and never touches that list, so clearing it takes out
+  exactly the flat scripts the reload is about to re-run.
+</p>
+
+<h2 id="evidence">What was actually verified, and how</h2>
+<table>
+  <tr><th>Claim</th><th>Evidence</th></tr>
+  <tr><td>The image base and address arithmetic are right</td><td><code>GET_HASH_KEY</code> called on the console returned <code>0x72B71C36</code> for GTA V and <code>0x3DBB3D48</code> for RDR2 — the joaat values computed independently</td></tr>
+  <tr><td>The detour and its trampoline survive relocation</td><td><code>frame hook is alive (frame 122)</code> — the hook ran, returned, and the game kept running</td></tr>
+  <tr><td>Vector3 <em>returns</em> decode correctly</td><td>real world coordinates from <code>GET_ENTITY_COORDS</code>, not zeroes or garbage</td></tr>
+  <tr><td>Float returns marshal</td><td><code>GET_ENTITY_SPEED</code> reporting <code>0.0 m/s</code> while standing still, and non-zero while moving</td></tr>
+  <tr><td>Vector3 <em>out-parameters</em> copy back</td><td><code>player model is 2.01 m tall</code> from two 24-byte buffers through <code>GET_MODEL_DIMENSIONS</code> — the path that silently returned zeroes for a long time, so a plausible non-zero answer is the one that matters</td></tr>
+  <tr><td>The extracted RDR2 addresses are the right ones</td><td>before any plugin existed: <code>SQRT(16.0)</code> → 4.0, <code>POW(2.0, 10.0)</code> → 1024.0, called directly over RPC at the extracted RVAs</td></tr>
+</table>
+
+<h2>Testing</h2>
+<p>
+  Everything below the ORBIS line is plain C++ and Lua and runs on a PC:
+  the native bridge and its marshalling, the wire codec, the path guard, the token
+  policy, the resource model and its scheduler. <code>tests/run.sh</code> also gates
+  the things a unit test cannot see:
+</p>
+<ul>
+  <li>the committed generated bindings against a fresh regeneration, so the compiler
+      and scripts cannot be handed different addresses;</li>
+  <li><code>src/script/embedded_lua.h</code> against the <code>.lua</code> files it is
+      generated from — the console runs the header, not the files, and a stale header
+      would leave every Lua suite green while testing code that does not ship;</li>
+  <li>each profile's hook target still being safe to detour;</li>
+  <li>the editor's runtime definitions naming every global the runtime installs;</li>
+  <li>source-level facts about ORBIS-only code no host test can link — that
+      <code>log_sink</code> does not call <code>notify</code>, that the notify sink is
+      installed at all, and that <code>script_reload</code> clears the tick list
+      <em>before</em> reloading.</li>
+</ul>
+<p>
+  Each of those gates fails loudly if its own pattern stops matching, rather than
+  passing vacuously. A gate that can quietly stop checking is worse than no gate.
+</p>
+
+</div>
+
+<footer class="site">
+  <div class="wrap">
+    Luma is MIT licensed.
+    <a href="https://github.com/xeghosted/luma">Source on GitHub</a>.
+  </div>
+</footer>
+</html>

@@ -145,14 +145,15 @@ function menu(state)
     return MENU.open
 end
 
--- Named, and global, on purpose. script_reload() re-runs this file but never
--- clears the runtime's tick list -- runtime_init builds it once and on_tick only
--- appends -- so a second run would leave TWO copies of this callback registered.
--- Two copies both see the same "just pressed" in the same frame, so the toggle
--- would flip twice and the menu would stop opening. Registering once and
--- dispatching through a global the reload replaces keeps a push-and-reload
--- honest: the body is new, the registration is not.
-function __luma_menu_tick()
+-- Registered unconditionally, and that is deliberate.
+--
+-- script_reload() clears the runtime's tick list before re-running the files, so
+-- re-running this one cannot leave a second copy of the callback behind. It also
+-- means the opposite mistake is the dangerous one now: guarding registration
+-- behind a global flag would survive the reload while the tick list did not, so
+-- the file would run, skip the registration it thinks it already did, and leave
+-- nothing driving the menu at all. Register every time.
+local function tick()
     if IS_DISABLED_CONTROL_JUST_PRESSED(0, TOGGLE) then
         MENU.open = not MENU.open
     end
@@ -203,7 +204,4 @@ function __luma_menu_tick()
     text(string.format("%d / %d", MENU.index, n), cx, foot + 0.008, 0.35, 190, 190, 190, true)
 end
 
-if not __luma_menu_registered then
-    __luma_menu_registered = true
-    on_tick(function() __luma_menu_tick() end)
-end
+on_tick(tick)

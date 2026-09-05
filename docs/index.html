@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Luma — Lua scripting for RAGE games on PS4</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Luma is a GoldHEN plugin that gives Grand Theft Auto V and Red Dead Redemption 2 on PS4 a Lua runtime, with live script reloading from VS Code.">
+<link rel="stylesheet" href="style.css">
+
+<header class="site">
+  <div class="brand">
+    <a class="name" href="index.html">Luma</a>
+    <span class="tag">Lua scripting for RAGE games on PS4</span>
+  </div>
+  <nav class="site">
+    <a href="index.html" aria-current="page">Overview</a>
+    <a href="install.html">Install</a>
+    <a href="scripting.html">Scripting</a>
+    <a href="editor.html">Editor</a>
+    <a href="internals.html">Internals</a>
+    <a href="https://github.com/xeghosted/luma">GitHub</a>
+  </nav>
+</header>
+
+<div class="wrap">
+
+<h1>One plugin, two games, live Lua</h1>
+<p class="lede">
+  Luma is a GoldHEN plugin that boots a Lua&nbsp;5.4 runtime inside a running RAGE
+  game on a jailbroken PS4. It binds the game's own native functions as ordinary Lua
+  functions and runs your code on the game thread, once per frame.
+</p>
+
+<pre><code>on_tick(function()
+    local ped = GET_PLAYER_PED(-1)
+    local c   = GET_ENTITY_COORDS(ped, true)   -- Vector3 returns arrive as {x, y, z}
+    if GET_ENTITY_HEALTH(ped) &lt; 100 then
+        SET_ENTITY_HEALTH(ped, GET_ENTITY_MAX_HEALTH(ped))
+    end
+end)</code></pre>
+
+<p>
+  With the <a href="editor.html">VS&nbsp;Code extension</a> you save a file and it is
+  running on the console a moment later. Scripts and resources reload live; only a new
+  plugin binary needs a game restart.
+</p>
+
+<div class="cards">
+  <a class="card" href="install.html"><b>Install →</b><span>Build it, push it to the console, and read the first boot log.</span></a>
+  <a class="card" href="scripting.html"><b>Scripting →</b><span>on_tick, natives, memory, resources, and the whole runtime API.</span></a>
+  <a class="card" href="editor.html"><b>Editor →</b><span>Push-and-run from VS Code, a Lua console, live logs.</span></a>
+  <a class="card" href="internals.html"><b>Internals →</b><span>How it tells the games apart, calls a native, and finds 7,072 of them.</span></a>
+</div>
+
+<h2>The two games</h2>
+<p>
+  Luma identifies the game it was loaded into by a byte signature and switches
+  everything that differs behind one profile: native table, frame hook, data root,
+  control port. The two data roots are deliberately separate — one console can host
+  both, and a script must never land in the other game's <code>scripts/</code>
+  directory.
+</p>
+
+<table>
+  <tr><th></th><th>Grand Theft Auto V</th><th>Red Dead Redemption 2</th></tr>
+  <tr><td>Build</td><td>CUSA00411 v1.57</td><td>CUSA03041 v1.32</td></tr>
+  <tr><td>Data root</td><td><code>/data/gtalua/</code></td><td><code>/data/rdr2lua/</code></td></tr>
+  <tr><td>Control port</td><td>9615</td><td>9616</td></tr>
+  <tr><td>Natives</td><td>6,485 bound &mdash; 2,811 by address, 3,674 resolved by walking the masked registry at boot</td><td>7,072 bound, all by address, compiled in from the eboot</td></tr>
+  <tr><td>Script globals</td><td>available</td><td>not located in this build</td></tr>
+</table>
+
+<div class="warn">
+  <strong>An unknown build does not load.</strong>
+  An RVA is valid for exactly one build. On any other version those addresses point
+  at something else and calling them crashes the game — so Luma refuses instead of
+  guessing: it writes the bytes it actually found at the signature address into its
+  log and stops. If your version is not one of the two above, this plugin is not for
+  it yet.
+</div>
+
+<h2>What it can do</h2>
+<ul>
+  <li><b>Call any native the build registers</b>, by its canonical name, with types
+      marshalled for you — ints, floats, bools, strings, pointers and Vector3.</li>
+  <li><b>Run per-frame code</b> on the game thread through <code>on_tick</code>.</li>
+  <li><b>Resources</b> in the familiar shape: a folder with an
+      <code>fxmanifest.lua</code>, <code>CreateThread</code>, <code>Wait</code>,
+      events, exports, and start/stop/restart at runtime.</li>
+  <li><b>Live editing</b> over a TCP control channel: push a file, reload the script
+      directory or restart one resource, evaluate an expression, stream the log.</li>
+  <li><b>Autocomplete</b> for every native, from generated LuaLS definitions.</li>
+</ul>
+
+<h2>What it deliberately does not do</h2>
+<ul>
+  <li><b>Nothing online.</b> This is for single-player. Using it anywhere else is
+      your problem and a fast route to a ban.</li>
+  <li><b>No authentication by default.</b> Anyone who can reach the control port can
+      run arbitrary Lua inside the game — the same trust level GoldHEN's FTP already
+      grants on the same network. There is a
+      <a href="internals.html#auth">token</a> if you want one.</li>
+  <li><b>No script globals on RDR2.</b> The block table has not been located in that
+      build, so those two functions raise rather than read and write an address
+      derived from nothing.</li>
+</ul>
+
+<h2>Proven on hardware</h2>
+<p>Both games, from their own boot logs:</p>
+<pre><code>[profile] Grand Theft Auto V (CUSA00411), data root /data/gtalua/, port 9615
+[hash_natives] walked table: 6691 natives, 0 rejected
+[hash_natives] GET_HASH_KEY -&gt; 0x72B71C36 (OK, table usable)
+
+[profile] Red Dead Redemption 2 (CUSA03041), data root /data/rdr2lua/, port 9616
+[hash_natives] 7072 natives compiled in; GET_HASH_KEY -&gt; 0x3DBB3D48 (OK)
+player model is 2.01 m tall</code></pre>
+<p>
+  Each line settles something different — the hash check proves the address
+  arithmetic, the frame hook proves the detour survived relocation, and
+  <code>2.01 m tall</code> proves Vector3 out-parameters, which is the path that
+  silently returned zeroes for a long time.
+  <a href="internals.html#evidence">The full account is in Internals.</a>
+</p>
+
+</div>
+
+<footer class="site">
+  <div class="wrap">
+    Luma is MIT licensed. It ships no game code — only addresses and hashes derived
+    from a binary you already own, the same category of information as the
+    <a href="https://xeghosted.github.io/ps4-offsets/">PS4 offset catalog</a>.
+    <a href="https://github.com/xeghosted/luma">Source on GitHub</a>.
+  </div>
+</footer>
+</html>

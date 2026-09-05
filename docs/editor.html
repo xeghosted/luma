@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Editor — Luma</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="RAGE Script Manager: the VS Code extension that pushes Lua to a running game on the PS4 and reloads it without a restart.">
+<link rel="stylesheet" href="style.css">
+
+<header class="site">
+  <div class="brand">
+    <a class="name" href="index.html">Luma</a>
+    <span class="tag">Lua scripting for RAGE games on PS4</span>
+  </div>
+  <nav class="site">
+    <a href="index.html">Overview</a>
+    <a href="install.html">Install</a>
+    <a href="scripting.html">Scripting</a>
+    <a href="editor.html" aria-current="page">Editor</a>
+    <a href="internals.html">Internals</a>
+    <a href="https://github.com/xeghosted/luma">GitHub</a>
+  </nav>
+</header>
+
+<div class="wrap">
+
+<h1>The editor half</h1>
+<p class="lede">
+  <b>RAGE Script Manager</b> is a VS Code extension that talks to Luma's control
+  channel. Save a file, press <code>Ctrl+Alt+R</code>, and the script is on the
+  console and running before you have let go of the key. Errors come back as
+  squiggles on the line that raised them.
+</p>
+
+<p>
+  <a href="https://marketplace.visualstudio.com/items?itemName=DominikHeise.rage-script-manager">Install
+  from the Marketplace</a> ·
+  <a href="https://github.com/xeghosted/rage-script-manager">Source</a>
+</p>
+
+<pre><code>code --install-extension DominikHeise.rage-script-manager</code></pre>
+
+<p>
+  One extension serves both games, and needed no game-specific code to do it: it never
+  builds console paths. It sends <em>relative</em> ones — <code>scripts/&lt;name&gt;</code>,
+  <code>resources/&lt;name&gt;/&lt;rel&gt;</code> — and the plugin resolves them under
+  whichever game's data root it detected at boot. The port is the only thing that
+  distinguishes them.
+</p>
+
+<h2>Setting it up</h2>
+<ol>
+  <li>Deploy Luma and start the game — see <a href="install.html">Install</a>.</li>
+  <li>Set <code>rageScriptManager.host</code> to your console's IP.</li>
+  <li>Set <code>rageScriptManager.port</code>: <b>9615</b> for GTA V, <b>9616</b> for
+      RDR2.</li>
+  <li>Run <b>RAGE: Connect</b>.</li>
+</ol>
+<p>
+  Both are workspace settings, so a GTA V workspace and an RDR2 workspace can sit open
+  side by side without either pointing at the wrong game.
+</p>
+
+<table>
+  <tr><th>Setting</th><th>Default</th><th></th></tr>
+  <tr><td><code>rageScriptManager.host</code></td><td><em>empty</em></td><td>Console IP or hostname. You must set this.</td></tr>
+  <tr><td><code>rageScriptManager.port</code></td><td><code>9615</code></td><td>9615 for GTA V, 9616 for RDR2.</td></tr>
+  <tr><td><code>rageScriptManager.token</code></td><td><em>empty</em></td><td>Shared secret, if the console has a token file.</td></tr>
+</table>
+
+<h2>Commands</h2>
+<p>All under the <code>RAGE:</code> category in the Command Palette.</p>
+<table>
+  <tr><th>Command</th><th>Keybinding</th><th></th></tr>
+  <tr><td>Connect / Disconnect</td><td></td><td>Opens the control channel</td></tr>
+  <tr><td>Push &amp; Restart</td><td><code>Ctrl+Alt+R</code></td><td>Saves the active file, sends it, restarts whatever it belongs to</td></tr>
+  <tr><td>Run Current File</td><td><code>Ctrl+Alt+Enter</code></td><td>Runs the buffer as a one-off, without saving or writing it to disk</td></tr>
+  <tr><td>Open Console</td><td></td><td>A terminal that evaluates Lua on the console; <code>=expr</code> prints a value</td></tr>
+  <tr><td>Show Log</td><td></td><td>The plugin's log, streamed live</td></tr>
+  <tr><td>New Resource</td><td></td><td>Scaffolds a working resource — manifest, script, <code>.luarc.json</code></td></tr>
+  <tr><td>Start / Stop / Restart Resource</td><td></td><td>From the palette or the Resources view</td></tr>
+  <tr><td>Refresh Resources</td><td></td><td>Re-reads the resource list</td></tr>
+  <tr><td>Deploy Plugin (.prx)</td><td></td><td>Runs the project's deploy script in a terminal</td></tr>
+</table>
+
+<p>
+  <b>Push &amp; Restart decides where a file belongs by its path.</b> Something under
+  <code>resources/&lt;name&gt;/</code> is written there and <em>that resource</em> is
+  restarted; anything else goes to <code>scripts/</code> and reloads the script
+  directory.
+</p>
+
+<h2>The console</h2>
+<p>
+  <b>RAGE: Open Console</b> gives you a REPL evaluating Lua in the same state your
+  scripts run in — the same globals, the same natives, the same everything. A leading
+  <code>=</code> makes it print the value:
+</p>
+<pre><code>= GET_ENTITY_HEALTH(GET_PLAYER_PED(-1))
+200
+= natives_ready()
+true
+SET_ENTITY_COORDS(GET_PLAYER_PED(-1), 0.0, 0.0, 100.0, false, false, false, true)</code></pre>
+<p>
+  This is the fastest way to find out what a native actually does, and the fastest way
+  to crash the game — the call runs on the game thread with whatever types you gave it.
+</p>
+
+<h2>Without VS Code</h2>
+<p>
+  <code>tools/console.ps1</code> speaks the same protocol from a shell, which is
+  useful for scripting a deploy or for checking something without an editor open:
+</p>
+<pre><code>pwsh tools/console.ps1 hello   -Ip 192.168.1.50 -Port 9615
+pwsh tools/console.ps1 reload  -Ip 192.168.1.50 -Port 9615
+pwsh tools/console.ps1 exec    "return 1 + 1" -Ip 192.168.1.50 -Port 9615
+pwsh tools/console.ps1 reslist -Ip 192.168.1.50 -Port 9615
+pwsh tools/console.ps1 log     -Ip 192.168.1.50 -Port 9615</code></pre>
+
+<div class="warn">
+  <strong>The channel serves one client at a time.</strong>
+  Run <b>Disconnect</b> before pointing another tool at the same port, or the second
+  connection is accepted and then never answered — which looks exactly like a hang,
+  not like a busy signal.
+</div>
+
+<h2>Autocomplete</h2>
+<p>
+  Native autocomplete comes from the <em>plugin</em> project, not from the extension:
+  <code>editor/lua-defs/&lt;game&gt;/</code> holds tens of thousands of generated lines
+  per game, which is why they live with the game they describe rather than being
+  bundled into an extension that serves both. <b>New Resource</b> writes a
+  <code>.luarc.json</code> pointing at them. You need
+  <a href="https://marketplace.visualstudio.com/items?itemName=sumneko.lua">sumneko.lua</a>.
+</p>
+<p>
+  The extension knows about those files only well enough to <em>refuse to push one</em>
+  to the console — a type stub in <code>scripts/</code> would be run on every boot from
+  then on.
+</p>
+
+</div>
+
+<footer class="site">
+  <div class="wrap">
+    Luma is MIT licensed.
+    <a href="https://github.com/xeghosted/luma">Source on GitHub</a>.
+  </div>
+</footer>
+</html>
