@@ -11,15 +11,17 @@ param([string]$Ip = "10.10.10.235", [ValidateSet("rdr2","gta5")][string]$Game = 
 
 $DataRoot = if ($Game -eq "gta5") { "/data/gtalua" } else { "/data/rdr2lua" }
 
-# scripts/natives.lua in THIS repo is generated for one game, and pushing it
-# into the other game's tree would replace a working binding table with one
-# whose every address belongs to a different executable. -PrxOnly exists so the
-# .prx can be updated for a game whose scripts live elsewhere; the guard below
-# refuses the dangerous combination outright rather than trusting the flag.
-$RepoGame = "rdr2"     # which game scripts/natives.lua was generated for
-if ($Game -ne $RepoGame -and -not $PrxOnly) {
-    Write-Error ("Refusing to push $RepoGame scripts into $Game's data root. " +
-                 "Use -PrxOnly to deploy just the plugin, or generate $Game's natives.lua first.")
+# Each game's scripts live in their own tree, so -Game selects both ends at once
+# and one game's natives.lua can no longer reach the other's data root. That
+# used to be a guard against a flag; now it is structural.
+# Resolved, not just concatenated: $_.FullName below is an absolute path, and
+# the relative form ("...	ools/../resources/gta5") is longer, so subtracting
+# its length chopped the front off every filename -- client.lua went out as
+# ent.lua. Resolve-Path makes both sides the same shape.
+$SrcScripts   = (Resolve-Path "$PSScriptRoot/../scripts/$Game" -ErrorAction SilentlyContinue)?.Path
+$SrcResources = (Resolve-Path "$PSScriptRoot/../resources/$Game" -ErrorAction SilentlyContinue)?.Path
+if (-not $PrxOnly -and -not $SrcScripts) {
+    Write-Error "No scripts for $Game in this repo ($SrcScripts). Use -PrxOnly for the plugin alone."
     exit 1
 }
 Write-Host ("Target: {0}  ->  {1}" -f $Game, $DataRoot)
@@ -71,23 +73,23 @@ function Ftp-MkdRecursive($remoteDir) {
 
 if (-not $PrxOnly) {
 Ftp-MkdRecursive "$DataRoot/scripts"    # makes the data root on the way
-Ftp-Put "$root/scripts/natives.lua" "$DataRoot/natives.lua"
-Get-ChildItem "$root/scripts" -Filter *.lua | Where-Object { $_.Name -ne "natives.lua" } | ForEach-Object {
+Ftp-Put "$SrcScripts/natives.lua" "$DataRoot/natives.lua"
+Get-ChildItem $SrcScripts -Filter *.lua | Where-Object { $_.Name -ne "natives.lua" } | ForEach-Object {
     Ftp-Put $_.FullName "$DataRoot/scripts/$($_.Name)"
 }
 
-Get-ChildItem "$root/resources" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+Get-ChildItem $SrcResources -Directory -ErrorAction SilentlyContinue | ForEach-Object {
     Get-ChildItem $_.FullName -Recurse -File | ForEach-Object {
         # .Replace, not -replace: -replace takes a regex, and a lone '\' is an
         # invalid one (a trailing escape). This is a literal character swap.
-        $rel    = $_.FullName.Substring($root.Length + 1).Replace('\', '/')
+        $rel    = "resources/" + $_.FullName.Substring($SrcResources.Length + 1).Replace('\', '/')
         $remote = "$DataRoot/$rel"
         Ftp-MkdRecursive ($remote -replace '/[^/]+$', '')
         Ftp-Put $_.FullName $remote
     }
 }
-if (Test-Path "$root/autostart.cfg") {
-    Ftp-Put "$root/autostart.cfg" "$DataRoot/autostart.cfg"
+if (Test-Path "$SrcScripts/autostart.cfg") {
+    Ftp-Put "$SrcScripts/autostart.cfg" "$DataRoot/autostart.cfg"
 }
 
 }   # end -PrxOnly guard

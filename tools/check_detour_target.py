@@ -51,6 +51,7 @@ reads identically to a genuinely unsafe target, which is the same
 "can't-check looks like failed" confusion this tool exists to remove.
 """
 import argparse
+import json
 import os
 import re
 import struct
@@ -86,11 +87,11 @@ def read_text(path):
     sys.exit(f"{path}: no executable segment")
 
 
-def detour_safe(md, text, rva, need=PATCH_BYTES):
+def detour_safe(md, text, rva, need=PATCH_BYTES, base=0):
     """(ok, reason, instructions) for detouring `rva` with a `need`-byte patch."""
     total = 0
     covered = []
-    for insn in md.disasm(text[rva:rva + 64], rva):
+    for insn in md.disasm(text[rva - base:rva - base + 64], rva):
         covered.append(insn)
         total += insn.size
         if total >= need:
@@ -165,27 +166,46 @@ def main():
     }
     candidates = [args.eboot] if args.eboot else EBOOTS.get(args.game, [])
     eboot = next((p for p in candidates if p and os.path.exists(p)), None)
-    if eboot is None:
-        print(f"SKIP: no eboot for {args.game}; cannot re-derive its hook signature")
-        print("      looked in: " + ", ".join(p for p in candidates if p))
-        return 0
+    window_base = 0
 
-    text = read_text(eboot)
+    if eboot is not None:
+        text = read_text(eboot)
+        source = eboot
+    else:
+        # Fall back to a committed byte window where no raw image exists. It is
+        # named in the output on purpose: a check run against a fixture is not
+        # the same evidence as one run against the game's own binary, and the
+        # difference should be visible in the log rather than inferred.
+        fixture = os.path.join(HERE, "tests", "fixtures", f"{args.game}-hook-window.json")
+        alt = [f for f in os.listdir(os.path.join(HERE, "tests", "fixtures"))
+               if f.startswith(args.game) and f.endswith("-hook-window.json")]               if os.path.isdir(os.path.join(HERE, "tests", "fixtures")) else []
+        if alt:
+            fixture = os.path.join(HERE, "tests", "fixtures", alt[0])
+        if not os.path.exists(fixture):
+            print(f"SKIP: no eboot and no fixture for {args.game}; cannot check its hook signature")
+            return 0
+        with open(fixture, encoding="utf-8") as handle:
+            doc = json.load(handle)
+        window_base = int(doc["rva"], 16)
+        text = bytes(int(b, 16) for b in doc["bytes"].split())
+        source = f"{os.path.basename(fixture)} (a {len(text)}-byte window, not the whole image)"
+
+    print(f"checked against: {source}")
     rva, declared = hook_target_from_source(args.source, args.game)
-    actual = text[rva:rva + len(declared)]
+    actual = text[rva - window_base:rva - window_base + len(declared)]
     print(f"frame hook target: 0x{rva:X}")
 
     # --- half 1: the recorded prologue against the binary (no disassembler) ---
     if actual != declared:
         print("", file=sys.stderr)
-        print("FAILED: HOOK_PROLOGUE does not match the eboot at HOOK_RVA.", file=sys.stderr)
+        print("FAILED: the recorded prologue does not match the reference at that rva.", file=sys.stderr)
         print(f"        declared: {declared.hex(' ')}", file=sys.stderr)
         print(f"        eboot:    {actual.hex(' ')}", file=sys.stderr)
         print("        Either the target moved, or the hook was pointed at a different", file=sys.stderr)
         print("        native without re-deriving whether its prologue can be relocated.", file=sys.stderr)
         print("        Re-run this on a machine with capstone before trusting a new one.", file=sys.stderr)
         return 1
-    print(f"  recorded prologue matches the eboot ({len(declared)} bytes)")
+    print(f"  recorded prologue matches the reference ({len(declared)} bytes)")
 
     # --- half 2: is it actually relocatable? (needs capstone) ---
     if capstone is None:
@@ -195,7 +215,7 @@ def main():
 
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
     md.detail = True
-    ok, reason, covered = detour_safe(md, text, rva)
+    ok, reason, covered = detour_safe(md, text, rva, base=window_base)
     for insn in covered:
         print(f"    +{insn.address - rva:<3} {insn.size:<2}  {insn.mnemonic:<9} {insn.op_str}")
     print(f"  -> {'SAFE' if ok else 'UNSAFE'}: {reason}")

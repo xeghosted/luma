@@ -65,7 +65,7 @@ python3 tools/gen_natives.py --out-dir "$out/regen" >/dev/null || {
     echo "FAILED: tools/gen_natives.py could not run." >&2
     exit 1
 }
-for f in src/game/rdr2/natives.h          src/game/rdr2/natives_registry.h          scripts/natives.lua          editor/lua-defs/natives.def.lua; do
+for f in src/game/rdr2/natives.h          src/game/rdr2/natives_registry.h          scripts/rdr2/natives.lua          editor/lua-defs/rdr2/natives.def.lua; do
     if ! diff -q "$f" "$out/regen/$f" >/dev/null; then
         echo "" >&2
         echo "STALE: $f does not match a fresh generation." >&2
@@ -96,7 +96,7 @@ echo "every profile hooks the target it was verified against     ok"
 
 # --- the editor's definitions, against the globals that actually exist ------
 #
-# editor/lua-defs/rdr2lua.def.lua is what LuaLS reads, and it is hand-written
+# editor/lua-defs/rdr2/runtime.def.lua is what LuaLS reads, and it is hand-written
 # because it cannot be generated -- its own header says to update it whenever
 # the bridge gains a global. Nothing enforced that, and it drifted: the whole
 # resource API (CreateThread, Wait, RegisterCommand, exports, ...) was missing,
@@ -107,7 +107,7 @@ echo "every profile hooks the target it was verified against     ok"
 # This is a spelling check, not a type check: a name the runtime installs must
 # appear in the definitions. That is enough to catch the drift that actually
 # happens, which is a global added on one side and forgotten on the other.
-defs=editor/lua-defs/rdr2lua.def.lua
+defs=editor/lua-defs/rdr2/runtime.def.lua
 undefined=""
 bridge_globals=$(grep -ohE 'set_fn\(L, "[a-zA-Z_0-9]+|lua_setglobal\(L, "[a-zA-Z_0-9]+|set_int\(L, "[a-zA-Z_0-9]+' \
     src/script/native_bridge.cpp src/script/lua_runtime.cpp | sed 's/.*"//' | sort -u)
@@ -191,5 +191,5 @@ g++ -std=c++17 -I src -I src/lua -o "$out/host_bridge_test" \
     src/script/native_marshal.cpp \
     "$out"/*.o -lm
 
-# Run from the repo root: the test loads the real scripts/natives.lua.
+# Run from the repo root: the test loads the real scripts/rdr2/natives.lua.
 "$out/host_bridge_test"

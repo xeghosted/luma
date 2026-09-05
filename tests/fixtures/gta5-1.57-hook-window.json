@@ -1,0 +1,10 @@
+{
+  "why": "tools/check_detour_target.py re-derives each profile's hook signature from the game's eboot. No raw GTA V 1.57 eboot.bin is on hand - only an IDA database, which the checker cannot read and should not depend on. This is a 64-byte window read out of that database so the gta5 profile is checked like the rdr2 one instead of being SKIPped.",
+  "limits": "Weaker than the real image in one specific way: it cannot catch an rva that was wrong for 1.57 to begin with, because the window was taken AT that rva. It does catch the profile's recorded prologue drifting from it, and it lets the relocatability analysis run. Replace this with the eboot when one turns up.",
+  "title_id": "CUSA00411",
+  "version": "1.57",
+  "symbol": "GET_PLAYER_PED",
+  "rva": "0xAA9310",
+  "source": "E:/Projects/IDA/PS4/GTA5/eboot_named.i64 (IDA database), read 2026-09-05",
+  "bytes": "55 48 89 e5 53 50 48 89 fb 48 8b 43 10 8b 38 83 ff ff 75 10 48 8d 05 dd f3 7c 02 48 8b 00 48 8b 40 08 eb 0a be 01 00 00 00 e8 82 8a 09 00 31 c9 48 85 c0 74 0a 48 89 c7 e8 e3 89 09 00 89 c1 48"
+}

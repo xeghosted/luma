@@ -1,4 +1,4 @@
-// Host test for the native bridge and the generated scripts/natives.lua.
+// Host test for the native bridge and a generated natives.lua.
 //
 // Everything below the ORBIS line is pure C++ and Lua, so the interesting half
 // of this plugin can be exercised on a PC: the bridge dispatches through
@@ -193,7 +193,9 @@ int main() {
     script::bridge_open(L);
 
     // The generated prelude, loaded exactly as the plugin loads it on console.
-    if (luaL_loadfile(L, "scripts/natives.lua") != LUA_OK ||
+    // RDR2's, specifically: the bindings are per game and this suite asserts
+    // against RDR2 addresses. GTA V's live beside it in scripts/gta5/.
+    if (luaL_loadfile(L, "scripts/rdr2/natives.lua") != LUA_OK ||
         lua_pcall(L, 0, 0, 0) != LUA_OK) {
         printf("natives.lua failed to load: %s\n", lua_tostring(L, -1));
         return 1;
