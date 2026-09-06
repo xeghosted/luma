@@ -53,9 +53,17 @@ local MENU = { open = false, index = 1, x = 0.16, y = 0.20, w = 0.23, h = 0.035 
 
 -- Standard GTA V control indices, control group 0. They are just numbers the
 -- game looks up, so if one of these is taken on your setup, change it here.
-local TOGGLE = 20   -- INPUT_MULTIPLAYER_INFO  touchpad on a DualShock, Z on a keyboard
+--
+-- On a DualShock several of these land on the SAME physical button: control 20
+-- is D-pad Down, and so is INPUT_CELLPHONE_DOWN. That is why the toggle is only
+-- read while the menu is closed (see tick below) -- otherwise the press that
+-- opens the menu also moves the cursor, and the next one closes it again
+-- instead of navigating. Splitting it by state makes the binding table
+-- irrelevant: whatever TOGGLE turns out to be, it opens, and the menu owns the
+-- pad from then until you back out of it.
+local TOGGLE = 20   -- INPUT_MULTIPLAYER_INFO  D-pad down on a pad, Z on a keyboard
 local UP     = 172  -- INPUT_CELLPHONE_UP      D-pad up / arrow up
-local DOWN   = 173  -- INPUT_CELLPHONE_DOWN
+local DOWN   = 173  -- INPUT_CELLPHONE_DOWN    D-pad down / arrow down
 local SELECT = 176  -- INPUT_CELLPHONE_SELECT  cross / Enter
 local BACK   = 177  -- INPUT_CELLPHONE_CANCEL  circle / Backspace
 local PHONE  = 27   -- INPUT_PHONE -- shares D-pad up, so it gets held off too
@@ -154,10 +162,13 @@ end
 -- the file would run, skip the registration it thinks it already did, and leave
 -- nothing driving the menu at all. Register every time.
 local function tick()
-    if IS_DISABLED_CONTROL_JUST_PRESSED(0, TOGGLE) then
-        MENU.open = not MENU.open
+    if not MENU.open then
+        if IS_DISABLED_CONTROL_JUST_PRESSED(0, TOGGLE) then MENU.open = true end
+        -- Return either way. The press that opened the menu must not be read a
+        -- second time this frame as navigation -- on a pad it is the same
+        -- button -- and with the menu closed there is nothing to draw anyway.
+        return
     end
-    if not MENU.open then return end
 
     for i = 1, #BORROWED do
         DISABLE_CONTROL_ACTION(0, BORROWED[i], true)
@@ -201,7 +212,8 @@ local function tick()
 
     local foot = MENU.y + (n + 1) * MENU.h
     DRAW_RECT(cx, foot + MENU.h / 2, MENU.w, MENU.h, 0, 0, 0, 225, 0)
-    text(string.format("%d / %d", MENU.index, n), cx, foot + 0.008, 0.35, 190, 190, 190, true)
+    text(string.format("%d / %d   \xe2\x97\x8b back", MENU.index, n),
+         cx, foot + 0.008, 0.35, 190, 190, 190, true)
 end
 
 on_tick(tick)
