@@ -9,19 +9,33 @@
 # these must always be LF regardless of the checking-out platform.
 *.sh text eol=lf
 
-# tests/run.sh diffs the committed src/script/embedded_lua.h byte-for-byte
-# against a fresh run of tools/gen_embedded_lua.py, which always writes LF.
-# A CRLF checkout would make that gate fail on every single line for a header
-# that is perfectly up to date.
-src/script/embedded_lua.h text eol=lf
+# Everything below is BYTE-DIFFED by tests/run.sh against a fresh run of the
+# generator that produced it, and every one of those generators pins its output
+# to LF. A CRLF checkout therefore reports a perfectly correct file as stale, on
+# every line, and the message sends you off to regenerate something that was
+# never wrong.
+#
+# That is not hypothetical. These rules once named the pre-split paths
+# (scripts/natives.lua, editor/lua-defs/natives.def.lua,
+# src/rage/invoker/natives.h) and kept naming them after the files moved, so
+# they quietly stopped matching anything. The files were then committed with
+# CRLF, and a fresh clone of this repository failed its own test suite. The
+# patterns below are globbed per game precisely so that adding a third one
+# cannot reintroduce that.
+#
+# tests/run.sh now refuses to run if any file it diffs is not covered here, so
+# a path that moves out from under these rules fails loudly instead of silently.
+scripts/*/natives.lua                text eol=lf
+editor/lua-defs/*/natives.def.lua    text eol=lf
+editor/lua-defs/*/runtime.def.lua    text eol=lf
+src/game/*/natives.h                 text eol=lf
+src/game/*/natives_registry.h        text eol=lf
+src/game/*/natives_hash.h            text eol=lf
+src/script/embedded_lua.h            text eol=lf
+tools/native_registry.json           text eol=lf
+tools/rdr2_native_signatures.h       text eol=lf
 
-# Same reasoning for the native bindings. tests/run.sh regenerates all four
-# with tools/gen_natives.py and diffs them against these committed copies; the
-# generator pins its output to LF, so a CRLF checkout would report every one of
-# them as stale while they are in fact correct. native_registry.json is the
-# input those four are derived from and is written the same way.
-src/rage/invoker/natives.h          text eol=lf
-src/rage/invoker/natives_registry.h text eol=lf
-scripts/natives.lua                 text eol=lf
-editor/lua-defs/natives.def.lua     text eol=lf
-tools/native_registry.json          text eol=lf
+# The Lua the runtime compiles in, and the scripts the console runs. Not
+# byte-diffed, but they are read by luac5.4 under WSL in the same suite and
+# there is no reason for them to differ by platform.
+*.lua text eol=lf

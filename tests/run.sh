@@ -77,6 +77,40 @@ for f in src/game/rdr2/natives.h          src/game/rdr2/natives_registry.h      
 done
 echo "generated native bindings match the registry               ok"
 
+# --- ...and those diffs only mean anything if the files cannot be converted ---
+#
+# Every file compared above is byte-diffed against a generator that pins its
+# output to LF. On a Windows checkout with core.autocrlf=true, a file NOT
+# covered by an eol=lf rule in .gitattributes comes out with CRLF -- and the
+# diff then reports a perfectly correct file as stale, on every line, sending
+# you off to regenerate something that was never wrong.
+#
+# This happened. The rules named the pre-split paths (scripts/natives.lua,
+# src/rage/invoker/natives.h) and went on naming them after the files moved, so
+# they matched nothing, and a fresh clone of this repository failed its own test
+# suite. Locally everything passed, because the generator had written those
+# files with LF and git never rewrote them -- which is the worst shape a bug can
+# have: invisible to the person who could fix it.
+#
+# So check the attribute, not the bytes. git check-attr answers what a checkout
+# WOULD do, which is the thing that actually differs between machines.
+unpinned=""
+for f in src/script/embedded_lua.h tools/native_registry.json tests/run.sh \
+         src/game/rdr2/natives.h src/game/rdr2/natives_registry.h \
+         scripts/rdr2/natives.lua editor/lua-defs/rdr2/natives.def.lua; do
+    eol=$(git check-attr eol -- "$f" 2>/dev/null | sed 's/.*eol: //')
+    if [ "$eol" != "lf" ]; then unpinned="$unpinned $f($eol)"; fi
+done
+if [ -n "$unpinned" ]; then
+    echo "" >&2
+    echo "NOT PINNED TO LF in .gitattributes:$unpinned" >&2
+    echo "       These are byte-diffed above. A Windows checkout would convert them" >&2
+    echo "       and report correct files as stale. Add an eol=lf rule that matches" >&2
+    echo "       the path they live at NOW." >&2
+    exit 1
+fi
+echo "every byte-diffed file is pinned to LF                    ok"
+
 # --- the frame hook's target must actually be detourable --------------------
 #
 # GoldHEN's Detour overwrites 14 bytes and memcpy's the displaced prologue into
