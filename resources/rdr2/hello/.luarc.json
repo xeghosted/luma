@@ -5,7 +5,24 @@
     "../../../editor/lua-defs/rdr2"
   ],
   "diagnostics.globals": [
-    "menu"
+    "author",
+    "client_script",
+    "client_scripts",
+    "dependencies",
+    "dependency",
+    "description",
+    "fx_version",
+    "game",
+    "games",
+    "menu",
+    "name",
+    "script",
+    "scripts",
+    "server_script",
+    "server_scripts",
+    "shared_script",
+    "shared_scripts",
+    "version"
   ],
   "workspace.checkThirdParty": false
 }

@@ -120,10 +120,21 @@ local c     = GET_ENTITY_COORDS(ped, true)        -- a Vector3 return -&gt; {x, 
 </p>
 
 <pre><code>local lo, hi = mem_alloc(24), mem_alloc(24)
-GET_MODEL_DIMENSIONS(GET_ENTITY_MODEL(ped), lo, hi)
-local a, b = read_vector3(lo), read_vector3(hi)
-log(string.format("model is %.2f m tall", b[3] - a[3]))
-mem_free(lo); mem_free(hi)</code></pre>
+if lo and hi then
+    GET_MODEL_DIMENSIONS(GET_ENTITY_MODEL(ped), lo, hi)
+    local a, b = read_vector3(lo), read_vector3(hi)
+    log(string.format("model is %.2f m tall", b[3] - a[3]))
+end
+if lo then mem_free(lo) end
+if hi then mem_free(hi) end</code></pre>
+
+<div class="note">
+  <strong>Check what mem_alloc gave you.</strong>
+  It returns nil when the allocation fails, and the definitions say so, so
+  skipping the check is a type warning in the editor. It is also worth heeding:
+  a native called with a nil address runs on the <em>game</em> thread, where a
+  bad pointer takes the game down instead of raising a Lua error you can read.
+</div>
 
 <div class="warn">
   <strong>A Vector3 out-parameter is 24 bytes, not 12.</strong>

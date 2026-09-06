@@ -44,11 +44,18 @@ on_tick(function()
     -- y and z at an 8-byte stride, which is why read_vector3 exists. The
     -- disassembly that establishes it is quoted in src/rage/invoker/invoker.h.
     local lo, hi = mem_alloc(24), mem_alloc(24)
-    GET_MODEL_DIMENSIONS(GET_ENTITY_MODEL(ped), lo, hi)
-    local lo_v, hi_v = read_vector3(lo), read_vector3(hi)
-    log(string.format("player model is %.2f m tall", hi_v[3] - lo_v[3]))
-    mem_free(lo)
-    mem_free(hi)
+    -- mem_alloc returns nil if the allocation fails. Checking is not ceremony:
+    -- a native called with a nil address runs on the GAME thread, where a bad
+    -- pointer takes the game down instead of raising a Lua error you can read.
+    if lo and hi then
+        GET_MODEL_DIMENSIONS(GET_ENTITY_MODEL(ped), lo, hi)
+        local lo_v, hi_v = read_vector3(lo), read_vector3(hi)
+        log(string.format("player model is %.2f m tall", hi_v[3] - lo_v[3]))
+    end
+    -- Freed separately, because if only one of the two succeeded the other
+    -- still has to go back.
+    if lo then mem_free(lo) end
+    if hi then mem_free(hi) end
 end)
 
 -- log() and print() go to rdr2lua.log and out to the editor, and deliberately
