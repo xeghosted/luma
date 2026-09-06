@@ -195,6 +195,17 @@ mov     [r14 + rax*8 + 8],  rdx      ; node-&gt;funcs[i]</code></pre>
   <tr><td>20 CMD</td><td>run a registered command</td><td></td><td></td></tr>
 </table>
 
+<div class="warn">
+  <strong>An idle connection is closed after 30 seconds.</strong>
+  The server reaps a session that has seen no traffic in <em>either</em>
+  direction, which is what stops a dead peer holding the single client slot
+  forever. A client that only listens must therefore say something: send
+  <code>PING</code> (op&nbsp;2) every ten seconds or so. That is what the opcode
+  is for. Skip it and the session dies on its own after a while &mdash;
+  unpredictably, because whatever your scripts happen to log resets the same
+  clock, which makes it look like a network fault rather than a timeout.
+</div>
+
 <p>
   The opcode table and a set of encoded vectors live in one fixture,
   <code>tests/protocol_vectors.json</code>, which <em>both</em> sides assert against —
